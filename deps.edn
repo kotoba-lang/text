@@ -1,0 +1,13 @@
+{:paths ["src"]
+ :version "0.1.0"
+ ;; kotoba-lang/text — string/regex/unicode helpers. The stdlib gap every lib
+ ;; re-rolls (json/lint/time hand-roll string ops). Zero third-party deps; .cljc.
+ ;; Regex uses the host's #"..."; pure string ops are portable. Runs on
+ ;; JVM/SCI/CLJS/GraalVM/kotoba-WASM. See ADR-kotoba-lang-foundational-stdlib.md.
+ :deps {}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}}}
