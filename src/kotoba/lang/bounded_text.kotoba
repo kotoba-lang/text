@@ -1,0 +1,48 @@
+(ns kotoba.lang.bounded-text
+  (:export [contains-text? starts-with-text? ends-with-text?
+            replace-every fold-case main]))
+
+;; Sovereign bounded text kernel. The general CLJC oracle keeps regex,
+;; Unicode codepoint construction, printf, and collection-returning split.
+;; This module owns the dependency-heavy portable predicates that the Kotoba
+;; compiler already lowers consistently to reference JS and typed Wasm.
+
+(defn contains-text? [text :string needle :string] :bool
+  (if (string-contains? text needle) true false))
+
+(defn starts-with-text? [text :string prefix :string] :bool
+  (let [text-size (string-byte-length text)
+        prefix-size (string-byte-length prefix)]
+    (if (> prefix-size text-size)
+      false
+      (if (string=? (string-substring text 0 prefix-size) prefix)
+        true
+        false))))
+
+(defn ends-with-text? [text :string suffix :string] :bool
+  (let [text-size (string-byte-length text)
+        suffix-size (string-byte-length suffix)]
+    (if (> suffix-size text-size)
+      false
+      (if (string=?
+            (string-substring text (- text-size suffix-size) text-size)
+            suffix)
+        true
+        false))))
+
+(defn replace-every [text :string match :string replacement :string] :string
+  (string-replace-all text match replacement))
+
+(defn fold-case [text :string] :string
+  (string-fold-case text))
+
+(defn main [] :i64
+  (if (contains-text? "final decision" "decision")
+    (if (starts-with-text? "kotoba-lang" "kotoba")
+      (if (ends-with-text? "actor.cljc" ".cljc")
+        (if (string=? (replace-every "a.a" "." "-") "a-a")
+          (if (string=? (fold-case "FINAL Decision") "final decision") 42 5)
+          4)
+        3)
+      2)
+    1))

@@ -1,0 +1,34 @@
+{:schema :kotoba.text-migration/v1
+ :profile :kotoba.text/bounded-v1
+ :legacy
+ {:source "src/kotoba/lang/text.cljc"
+  :status :retained-general-oracle}
+ :canonical
+ {:source "src/kotoba/lang/bounded_text.kotoba"
+  :authority :kotoba
+  :required-capabilities []}
+ :ported
+ [:contains-text? :starts-with-text? :ends-with-text?
+  :replace-every :fold-case]
+ :retained
+ {:regex "Host regex is not part of the pure-product profile."
+  :split "Collection-returning string split remains deferred in T4.2;
+          string-split-count admits and runs on KIR/Wasm but restricted JS
+          rejects it as an unsupported KIR operation (measured 2026-08-02)."
+  :unicode-construction "Requires bounded codepoint collection design."
+  :format "Variadic formatting requires a bounded structural-argument API."
+  :trim-and-padding "Follow after whitespace and repeat-string semantics are admitted."}
+ :bounds
+ {:string "compiler pure-product UTF-8 string bound"
+  :substring-index :utf8-byte-offset
+  :effects []}
+ :verification
+ {:self-check-main 42
+  :required-targets [:js-browser-kotoba-v1 :wasm32-browser-kotoba-v1]
+  :negative-cases [:prefix-longer-than-input :suffix-longer-than-input]
+  :local-result
+  {:date "2026-08-02"
+   :pure-product-check :pass
+   :js-browser {:compile :pass :main 42}
+   :wasm32-browser {:compile :pass :instantiate :pass :main 42}
+   :required-capabilities []}}}

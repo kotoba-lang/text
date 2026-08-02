@@ -23,6 +23,13 @@ kotoba-WASM). Regex uses the host's `#"...";` pure string ops are portable. See
 - `pad-left` / `pad-right` — padding
 - `truncate` — truncate with optional ellipsis
 
+`kotoba.lang.bounded-text` is the sovereign `.kotoba` kernel for the bounded
+portable subset used during CLJC migration: contains, starts/ends-with,
+replace-all, and case-fold. The CLJC namespace remains the
+general oracle for regex, collection-returning split, Unicode construction,
+formatting, trim, and padding until those surfaces have bounded compiler
+contracts. See `migration/bounded-text-v1.edn`.
+
 ## Install
 
 ```clojure
