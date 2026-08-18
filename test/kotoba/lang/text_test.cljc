@@ -32,7 +32,13 @@
   (is (= "x = 42" (t/format "%s = %d" ["x" 42])))
   (is (= "100%" (t/format "100%%" [])))
   (is (= "ff" (t/format "%x" [255])))
-  (is (= "1.5" (t/format "%f" [1.5]))))
+  ;; %f with no precision is SIX places in printf, and that is what
+  ;; clojure.core/format produces: (format "%f" 1.5) => "1.500000".
+  ;; This test pinned "1.5", which the old implementation gave because it
+  ;; ignored precision entirely. Conforming to clojure.core is the point of
+  ;; this function, so the expectation moves, not the code.
+  (is (= "1.500000" (t/format "%f" [1.5])))
+  (is (= "1.5" (t/format "%.1f" [1.5]))))
 
 (deftest codepoints
   (is (= [97 98] (t/codepoints "ab")))
