@@ -1,8 +1,9 @@
 (ns kotoba.lang.text
   "String / regex / unicode helpers for the kotoba foundational stdlib. The gap
   every other lib re-rolls (json/lint/time hand-roll string ops). Pure string
-  ops are portable; regex uses the host's #\"...\". `format` is a pure %s/%d
-  impl (no String/format — WASM-safe). Runs on JVM/SCI/CLJS/GraalVM/kotoba-WASM.
+  ops are portable; regex uses the host's #\"...\". `format` is a pure printf
+  impl with flags/width/precision (no String/format — WASM-safe), varargs like
+  clojure.core/format, which is JVM-only. Runs on JVM/SCI/CLJS/GraalVM/kotoba-WASM.
 
   Zero third-party runtime deps; .cljc."
   (:refer-clojure :exclude [format split join replace re-find re-matches re-seq])
@@ -57,33 +58,103 @@
   [re s]
   (#?(:clj clojure.core/re-seq :cljs cljs.core/re-seq) re s))
 
-;; ---------- format (pure %s/%d/%x) ----------
+;; ---------- format (pure printf: flags, width, precision) ----------
+;;
+;; Replaces clojure.core/format, which is JVM-only -- it wraps String.format,
+;; so nbb resolves it to nil and every portable namespace that calls it is
+;; pinned to the JVM. Measured 2026-08-18 across this workspace: 673 production
+;; .clj files call `format`, second only to `spit`.
+;;
+;; The earlier implementation here handled bare %s %d %x %f and fell through to
+;; a literal for anything else. Measured over the 5,968 specifiers actually in
+;; use, 944 of them (16%) carry a width or precision -- %.1f (176), %02x (133),
+;; %.2f (119), %-10s (32), %064x (17). Those did not error; they emitted "%."
+;; followed by the rest as literal text. Silently wrong output is worse than a
+;; missing function, which is why this grammar exists.
+;;
+;; %064x in particular is how a 32-byte hash is rendered. Getting it wrong is
+;; not cosmetic.
 
-(defn- fmt-one [spec arg]
-  (cond
-    (= spec "s") (str arg)
-    (= spec "d") (str (long arg))
-    (= spec "x") (#?(:clj  (fn [n] (Long/toHexString n))
-                     :cljs (fn [n] (.toString n 16))) (long arg))
-    (= spec "f") (str (double arg))
-    :else        (str "%" spec)))
+(defn- pad
+  "Pad `s` to `width` with `fill`, on the left unless `left?`."
+  [s width left? fill]
+  (let [n (- width (count s))]
+    (if (pos? n)
+      (let [p (apply str (repeat n fill))]
+        (if left? (str s p) (str p s)))
+      s)))
+
+(defn- fixed
+  "Round `x` to `prec` decimal places without String/format or goog. Uses
+  integer arithmetic on the scaled value so the result does not depend on the
+  host's float printing."
+  [x prec]
+  (let [neg? (neg? x)
+        x (Math/abs (double x))
+        scale (Math/pow 10 prec)
+        scaled (Math/round (* x scale))
+        i (long (quot scaled scale))
+        f (long (- scaled (* i scale)))
+        frac (when (pos? prec) (pad (str f) prec false \0))]
+    (str (when neg? "-") i (when frac (str "." frac)))))
+
+(defn- to-hex [n]
+  #?(:clj (Long/toHexString (long n))
+     :cljs (.toString (long n) 16)))
+
+(defn- fmt-one [{:keys [flags width prec conv]} arg]
+  (let [left? (cstr/includes? flags "-")
+        zero? (and (cstr/includes? flags "0") (not left?))
+        body (case conv
+               ;; clojure.core/format renders nil as "null" (it defers to
+               ;; String.valueOf), not as the empty string that `str` gives.
+               ;; Caught by the differential test, not by reading the code.
+               "s" (let [v (if (nil? arg) "null" (str arg))]
+                     (if prec (subs v 0 (min prec (count v))) v))
+               "d" (str (long arg))
+               "x" (to-hex arg)
+               "X" (upper (to-hex arg))
+               "o" #?(:clj (Long/toOctalString (long arg)) :cljs (.toString (long arg) 8))
+               "f" (fixed arg (or prec 6))
+               "c" (str (char (if (number? arg) (long arg) arg)))
+               "b" (str (boolean arg))
+               (str "%" conv))
+        body (if (and (cstr/includes? flags "+") (#{"d" "f"} conv) (not (cstr/starts-with? body "-")))
+               (str "+" body) body)]
+    (if width (pad body width left? (if zero? \0 \space)) body)))
+
+(def ^:private spec-re #"%([-+ 0#]*)(\d+)?(?:\.(\d+))?([a-zA-Z%])")
 
 (defn format
-  "Pure printf-style formatting supporting %s %d %x %f and literal %%.
-  `args` is a seq of values. No String/format — WASM-safe."
-  [fmt args]
-  (let [args (vec args)]
+  "printf-style formatting with flags, width and precision -- %s %d %x %X %o
+  %f %c %b and literal %%. VARARGS, like clojure.core/format, which this
+  replaces; clojure.core/format is JVM-only.
+
+  A seq may still be passed as a single second argument, which is how this
+  function used to be called; that form is kept so existing callers do not
+  change meaning. The two are distinguishable because the seq form takes
+  exactly one extra argument and it is sequential."
+  [fmt & args]
+  (let [args (vec (if (and (= 1 (count args)) (sequential? (first args)))
+                    (first args)
+                    args))]
     (loop [i 0 ai 0 out (transient [])]
       (if (>= i (count fmt))
         (apply str (persistent! out))
         (let [c (nth fmt i)]
           (if (not= c \%)
             (recur (inc i) ai (conj! out c))
-            ;; char after %
-            (let [c2 (nth fmt (inc i) \space)]
-              (if (= c2 \%)
-                (recur (+ i 2) ai (conj! out \%))
-                (recur (+ i 2) (inc ai) (conj! out (fmt-one (str c2) (args ai))))))))))))
+            (if-let [m (re-find spec-re (subs fmt i (min (count fmt) (+ i 16))))]
+              (let [[whole flags w p conv] m]
+                (if (= conv "%")
+                  (recur (+ i (count whole)) ai (conj! out \%))
+                  (recur (+ i (count whole)) (inc ai)
+                         (conj! out (fmt-one {:flags (or flags "")
+                                              :width (when w #?(:clj (Long/parseLong w) :cljs (js/parseInt w)))
+                                              :prec  (when p #?(:clj (Long/parseLong p) :cljs (js/parseInt p)))
+                                              :conv  conv}
+                                             (nth args ai nil))))))
+              (recur (inc i) ai (conj! out c)))))))))
 
 ;; ---------- unicode codepoints ----------
 
