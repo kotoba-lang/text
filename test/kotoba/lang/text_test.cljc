@@ -53,3 +53,28 @@
   (is (= "hel" (t/truncate "hello" 3)))
   (is (= "h..." (t/truncate "hello" 4 "...")))
   (is (= "hello" (t/truncate "hello" 10 "..."))))
+
+(deftest blank-predicate
+  (is (true?  (t/blank? "")))
+  (is (true?  (t/blank? nil)))
+  (is (true?  (t/blank? "   ")))
+  (is (false? (t/blank? "a")))
+  (is (false? (t/blank? " a "))))
+
+(deftest index-lookup
+  (is (= 1 (t/index-of "abc" "b")))
+  (is (= 1 (t/index-of "abc" \b)))
+  (is (nil? (t/index-of "abc" "x")))
+  (is (= 3 (t/index-of "abcabc" "a" 1)))
+  (is (= 4 (t/last-index-of "abcabc" "b")))
+  (is (= 1 (t/last-index-of "abcabc" "b" 3)))
+  (is (nil? (t/last-index-of "abc" "x"))))
+
+(deftest reverse-and-trim-newline
+  (is (= "cba" (t/reverse "abc")))
+  (is (= "" (t/reverse "")))
+  (is (= "hi" (t/trim-newline "hi\n")))
+  (is (= "hi" (t/trim-newline "hi\r\n")))
+  (is (= "hi" (t/trim-newline "hi")))
+  ;; trim-newline does not touch leading/interior whitespace
+  (is (= "  hi" (t/trim-newline "  hi\n"))))
