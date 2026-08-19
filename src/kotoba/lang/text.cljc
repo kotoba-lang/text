@@ -5,7 +5,8 @@
   impl (no String/format — WASM-safe). Runs on JVM/SCI/CLJS/GraalVM/kotoba-WASM.
 
   Zero third-party runtime deps; .cljc."
-  (:refer-clojure :exclude [format split join replace re-find re-matches re-seq])
+  (:refer-clojure :exclude [format split join replace re-find re-matches re-seq
+                            reverse])
   (:require [clojure.string :as cstr]))
 
 ;; ---------- split / join ----------
@@ -138,3 +139,33 @@
    (if (<= (count s) max-len)
      s
      (str (subs s 0 (max 0 (- max-len (count ellipsis)))) ellipsis))))
+
+;; ---------- remaining clojure.string parity ----------
+;; blank? / index-of / last-index-of / reverse / trim-newline were the last
+;; clojure.string primitives this oracle did not carry, forcing callers back
+;; to `clojure.string` directly for them.
+
+(defn blank?
+  "True if `s` is nil, empty, or contains only whitespace."
+  [s] (cstr/blank? s))
+
+(defn index-of
+  "Index of the first occurrence of `value` (string or char) in `s`, from
+  `from-index` if given, or nil if not found."
+  ([s value] (cstr/index-of s value))
+  ([s value from-index] (cstr/index-of s value from-index)))
+
+(defn last-index-of
+  "Index of the last occurrence of `value` (string or char) in `s`, searching
+  backward from `from-index` if given, or nil if not found."
+  ([s value] (cstr/last-index-of s value))
+  ([s value from-index] (cstr/last-index-of s value from-index)))
+
+(defn reverse
+  "Reverse the characters of `s`. Codepoint-naive (like clojure.string/reverse):
+  use `codepoints`/`from-codepoints` for a surrogate-pair-safe reversal."
+  [s] (cstr/reverse s))
+
+(defn trim-newline
+  "Remove trailing newline (\\n) or carriage-return+newline (\\r\\n) from `s`."
+  [s] (cstr/trim-newline s))
