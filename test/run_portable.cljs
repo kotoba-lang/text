@@ -15,9 +15,11 @@
 ;; `scripts/verify-cljs-runner-completeness.cljs` checks this file
 ;; against the tree.
 (require '[cljs.test :as t]
+         '[kotoba.lang.format-test]
          '[kotoba.lang.text-test])
 
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (when-not (t/successful? m) (set! (.-exitCode js/process) 1)))
 
-(t/run-tests 'kotoba.lang.text-test)
+(t/run-tests 'kotoba.lang.format-test
+             'kotoba.lang.text-test)
