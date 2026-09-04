@@ -1,5 +1,6 @@
 (ns kotoba.lang.text-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as cstr]
+            [clojure.test :refer [deftest is testing]]
             [kotoba.lang.text :as t]))
 
 (deftest split-join
@@ -78,3 +79,80 @@
   (is (= "hi" (t/trim-newline "hi")))
   ;; trim-newline does not touch leading/interior whitespace
   (is (= "  hi" (t/trim-newline "  hi\n"))))
+
+;; ---------- bounded-kernel oracle (2026-09-04) ----------
+;;
+;; Each expectation here mirrors a golden vector the .kotoba kernel
+;; (`bounded_text.kotoba`) answers through wasm32/browser-host. ASCII
+;; expectations agree with clojure.string; the multi-byte ones pin the
+;; divergences the kernel names (byte offsets, ASCII whitespace class,
+;; code-point-safe reversal).
+
+(deftest kernel-trim
+  (is (= "a b" (t/trim-text "  a b  ")))
+  (is (= "" (t/trim-text "")))
+  (is (= "" (t/trim-text "   ")))
+  (is (= "hi" (t/trim-text "hi")))
+  (is (= "hi" (t/triml-text "  \t hi")))
+  (is (= "hi" (t/trimr-text "hi \n ")))
+  ;; ASCII class only: U+3000 (ideographic space) is NOT whitespace here,
+  ;; where clojure.string/trim strips it.
+  (is (= " 日本語 " (t/trim-text " 日本語 ")))
+  (is (= "日本語" (t/trim-text "  日本語  ")))
+  (is (= "こ" (t/trim-text "こ\n"))))
+
+(deftest kernel-blank
+  (is (true? (t/blank-text? "")))
+  (is (true? (t/blank-text? " \t\n ")))
+  (is (false? (t/blank-text? " x ")))
+  (is (false? (t/blank-text? " 日本語 "))))
+
+(deftest kernel-reverse
+  (is (= "" (t/reverse-text "")))
+  (is (= "a" (t/reverse-text "a")))
+  (is (= "ba" (t/reverse-text "ab")))
+  (is (= "cba" (t/reverse-text "abc")))
+  (is (= "ök" (t/reverse-text "kö")))
+  ;; code-point-safe: a surrogate pair survives as one character
+  (is (= "😀a" (t/reverse-text "a😀")))
+  (is (= "本日" (t/reverse-text "日本"))))
+
+(deftest kernel-repeat
+  (is (= "" (t/repeat-text "ab" 0)))
+  (is (= "ab" (t/repeat-text "ab" 1)))
+  (is (= "ababab" (t/repeat-text "ab" 3)))
+  (is (= "-----" (t/repeat-text "-" 5)))
+  (is (= "" (t/repeat-text "ab" -2))))
+
+(deftest kernel-index
+  ;; ASCII: byte offsets agree with UTF-16 indexes
+  (is (= 1 (t/index-of-text "abc" "b")))
+  (is (= -1 (t/index-of-text "abc" "z")))
+  (is (= 1 (t/index-of-text "aXbXc" "Xb")))
+  (is (= -1 (t/index-of-text "" "a")))
+  (is (= 0 (t/index-of-text "abc" "")))
+  (is (= 3 (t/last-index-of-text "abcabc" "abc")))
+  (is (= 2 (t/last-index-of-text "aaa" "a")))
+  (is (= -1 (t/last-index-of-text "abc" "xyz")))
+  ;; multi-byte: BYTE offsets, where clojure.string answers UTF-16 units
+  (is (= 1 (t/index-of-text "kö" "ö")))            ; k=1 byte
+  (is (= 3 (t/index-of-text "日本語" "本")))         ; 日=3 bytes
+  (is (= 4 (t/last-index-of-text "x日本x" "本")))    ; x=1, 日=3
+  (is (= 12 (t/index-of-text "日本語のテキスト" "テキスト"))))
+
+(deftest kernel-pad
+  (is (= "007" (t/pad-left-text "7" 3 "0")))
+  (is (= "1234" (t/pad-left-text "1234" 3 "0")))
+  (is (= "7  " (t/pad-right-text "7" 3 " ")))
+  ;; empty fill cannot make progress: answer the input, not a loop
+  (is (= "7" (t/pad-left-text "7" 3 "")))
+  (is (= "7" (t/pad-right-text "7" 3 ""))))
+
+(deftest kernel-oracle-agrees-with-clojure-string-on-ascii
+  ;; The ASCII contract both layers claim.
+  (is (= (cstr/trim "  hi  ") (t/trim-text "  hi  ")))
+  (is (= (cstr/blank? "   ") (t/blank-text? "   ")))
+  (is (= (cstr/reverse "abc") (t/reverse-text "abc")))
+  (is (= (or (cstr/index-of "hello world" "world") -1) (t/index-of-text "hello world" "world")))
+  (is (= (or (cstr/index-of "abc" "z") -1) (t/index-of-text "abc" "z")))
+  (is (= 2 (t/index-of-text "kotoba" "to"))))

@@ -1,11 +1,27 @@
 (ns kotoba.lang.bounded-text
   (:export [contains-text? starts-with-text? ends-with-text?
-            replace-every fold-case main]))
+            replace-every fold-case
+            trim-text triml-text trimr-text blank-text?
+            reverse-text repeat-text
+            index-of-text last-index-of-text
+            pad-left-text pad-right-text
+            main]))
 
 ;; Sovereign bounded text kernel. The general CLJC oracle keeps regex,
 ;; Unicode codepoint construction, printf, and collection-returning split.
 ;; This module owns the dependency-heavy portable predicates that the Kotoba
 ;; compiler already lowers consistently to reference JS and typed Wasm.
+;;
+;; The 2026-09-04 tranche adds the clojure.string surface that COMPOSES from
+;; the language's own string builtins (lang/conformance/stdlib/manifest.edn
+;; :language-builtins :string-ops): trim/triml/trimr walk code points with
+;; string-code-point-at, reverse/repeat/index-of/last-index-of/pad walk the
+;; UTF-8 byte offsets string-substring speaks. Nothing here needs a new
+;; compiler operation. What CANNOT be written this way is not pretended:
+;; upper-case/capitalize need per-character transformation with no
+;; construction route (strings are immutable and there is no string-from-
+;; codepoint), and split needs a collection return (deferred, T4.2). Those
+;; stay named in migration/bounded-text-v1.edn :retained.
 
 (defn contains-text? [text :string needle :string] :bool
   (if (string-contains? text needle) true false))
@@ -36,12 +52,190 @@
 (defn fold-case [text :string] :string
   (string-fold-case text))
 
+;; ---------- whitespace (fold-case's own class) ----------
+;;
+;; The whitespace set is ASCII only: space, tab, newline, carriage return,
+;; form feed, vertical tab. clojure.string/trim uses Character/isWhitespace
+;; on the JVM, which also answers for Unicode space characters; the bounded
+;; kernel names its class instead of silently differing on which inputs.
+;; fold-case is the same trade: `K` folds, `Σ` does not.
+
+(defn- ws? [ch :i64] :bool
+  (if (= ch 32)
+    true
+    (if (= ch 9)
+      true
+      (if (= ch 10)
+        true
+        (if (= ch 13)
+          true
+          (if (= ch 12)
+            true
+            (if (= ch 11) true false)))))))
+
+(defn triml-text [text :string] :string
+  (let [size (string-byte-length text)]
+    (loop [i 0]
+      (if (>= i size)
+        ""
+        (let [ch (string-code-point-at text i)]
+          (if (ws? ch)
+            (recur (+ i (if (< ch 128) 1 0)))
+            (string-substring text i size)))))))
+
+;; THE 2026-09-04 tranche lives below; helpers first.
+
+(defn- step-boundary [text :string i :i64] :i64
+  ;; The byte offset where the code point STARTING AT i ends. The width
+  ;; comes from the decoded CODE POINT (what string-code-point-at answers),
+  ;; not the leading byte: U+00F6 is code point 246 but a 2-byte sequence.
+  ;; 1 byte < 128, 2 bytes < 2048, 3 bytes < 65536, 4 bytes otherwise.
+  (let [ch (string-code-point-at text i)]
+    (if (< ch 128)
+      (+ i 1)
+      (if (< ch 2048)
+        (+ i 2)
+        (if (< ch 65536) (+ i 3) (+ i 4))))))
+
+(defn trimr-text [text :string] :string
+  ;; Forward scan for the END of the last non-whitespace code point, then cut
+  ;; there. A backward walk would need string-code-point-at on arbitrary
+  ;; offsets, which refuses mid-code-point positions; the forward direction
+  ;; only ever asks at boundaries.
+  (let [size (string-byte-length text)]
+    (loop [i 0 keep 0]
+      (if (>= i size)
+        (string-substring text 0 keep)
+        (let [nxt (step-boundary text i)]
+          (if (ws? (string-code-point-at text i))
+            (recur nxt keep)
+            (recur nxt nxt)))))))
+
+(defn trim-text [text :string] :string
+  (trimr-text (triml-text text)))
+
+(defn blank-text? [text :string] :bool
+  (let [trimmed (trim-text text)]
+    (if (= (string-byte-length trimmed) 0) true false)))
+
+(defn reverse-text [text :string] :string
+  (let [size (string-byte-length text)]
+    (loop [i 0 acc ""]
+      (if (>= i size)
+        acc
+        (let [ch (string-code-point-at text i)
+              ;; width in bytes from the CODE POINT value (not the leading
+              ;; byte): U+00F6 is 246 but encodes as 2 bytes.
+              width (if (< ch 128)
+                      1
+                      (if (< ch 2048)
+                        2
+                        (if (< ch 65536) 3 4)))
+              piece (string-substring text i (+ i width))]
+          (recur (+ i width) (string-concat piece acc)))))))
+
+(defn repeat-text [text :string times :i64] :string
+  (if (<= times 0)
+    ""
+    (loop [n times acc ""]
+      (if (zero? n)
+        acc
+        (recur (- n 1) (string-concat acc text))))))
+
+(defn- window-eq? [text :string i :i64 needle :string needle-i :i64] :bool
+  ;; True when needle (as a code point sequence) matches text starting at
+  ;; byte offset i. Compares CODE POINT BY CODE POINT -- string-substring
+  ;; would refuse a window whose end lands mid-code-point, which is exactly
+  ;; what a mismatching multi-byte needle produces. Both walks advance by
+  ;; code point width and stop at the needle's end; equality of every code
+  ;; point plus equal byte sizes is string equality.
+  (if (> (+ i (string-byte-length needle)) (string-byte-length text))
+    false
+    (loop [ti i ni 0]
+      (if (>= ni (string-byte-length needle))
+        true
+        (if (= (string-code-point-at text ti) (string-code-point-at needle ni))
+          (recur (step-boundary text ti) (step-boundary needle ni))
+          false)))))
+
+(defn index-of-text [text :string needle :string] :i64
+  ;; Byte offset of the first needle occurrence at a code point boundary.
+  ;; The scan advances one code point at a time (never a raw byte), and the
+  ;; window comparison is code-point-wise (window-eq?), because a raw
+  ;; needle-sized string-substring would refuse exactly the mismatches that
+  ;; end mid-code-point.
+  (loop [i 0]
+    (if (> (+ i (string-byte-length needle)) (string-byte-length text))
+      -1
+      (if (window-eq? text i needle 0)
+        i
+        (recur (step-boundary text i))))))
+
+(defn last-index-of-text [text :string needle :string] :i64
+  ;; Highest boundary offset whose code-point window equals needle. The
+  ;; candidate walk is forward over code point boundaries.
+  (loop [i 0 best -1]
+    (if (> (+ i (string-byte-length needle)) (string-byte-length text))
+      best
+      (if (window-eq? text i needle 0)
+        (recur (step-boundary text i) i)
+        (recur (step-boundary text i) best)))))
+
+(defn pad-left-text [text :string width :i64 fill :string] :string
+  (let [size (string-byte-length text)
+        fill-size (string-byte-length fill)]
+    (if (>= size width)
+      text
+      (if (zero? fill-size)
+        text
+        (loop [acc text]
+          (if (>= (string-byte-length acc) width)
+            acc
+            (recur (string-concat fill acc))))))))
+
+(defn pad-right-text [text :string width :i64 fill :string] :string
+  (let [size (string-byte-length text)
+        fill-size (string-byte-length fill)]
+    (if (>= size width)
+      text
+      (if (zero? fill-size)
+        text
+        (loop [acc text]
+          (if (>= (string-byte-length acc) width)
+            acc
+            (recur (string-concat acc fill))))))))
+
 (defn main [] :i64
   (if (contains-text? "final decision" "decision")
     (if (starts-with-text? "kotoba-lang" "kotoba")
       (if (ends-with-text? "actor.cljc" ".cljc")
         (if (string=? (replace-every "a.a" "." "-") "a-a")
-          (if (string=? (fold-case "FINAL Decision") "final decision") 42 5)
+          (if (string=? (fold-case "FINAL Decision") "final decision")
+            (if (string=? (trim-text "  hi  ") "hi")
+              (if (string=? (triml-text "  hi") "hi")
+                (if (string=? (trimr-text "hi  ") "hi")
+                  (if (blank-text? "   ")
+                    (if (string=? (reverse-text "abc") "cba")
+                      (if (string=? (repeat-text "ab" 3) "ababab")
+                        (if (= (index-of-text "hello world" "world") 6)
+                          (if (= (last-index-of-text "abcabc" "bc") 4)
+                            (if (string=? (pad-left-text "7" 3 "0") "007")
+                              (if (string=? (pad-right-text "7" 3 " ") "7  ")
+                                (if (blank-text? "")
+                                  (if (= (index-of-text "abc" "zz") -1)
+                                    42 30)
+                                  29)
+                                28)
+                              27)
+                            26)
+                          25)
+                        24)
+                      23)
+                    22)
+                  21)
+                20)
+              19)
+            18)
           4)
         3)
       2)

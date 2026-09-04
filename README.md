@@ -22,13 +22,24 @@ kotoba-WASM). Regex uses the host's `#"...";` pure string ops are portable. See
 - `codepoints` / `from-codepoints` — unicode codepoint seqs (portable)
 - `pad-left` / `pad-right` — padding
 - `truncate` — truncate with optional ellipsis
+- `blank?` / `index-of` / `last-index-of` / `reverse` / `trim-newline` — the
+  last clojure.string primitives callers had to reach for `clojure.string` for
+- kernel oracles — `trim-text` / `triml-text` / `trimr-text` / `blank-text?` /
+  `reverse-text` / `repeat-text` / `index-of-text` / `last-index-of-text` /
+  `pad-left-text` / `pad-right-text`: the CLJC oracle for the same operations
+  as the `.kotoba` kernel, with the divergences the kernel names (UTF-8 byte
+  offsets, ASCII whitespace class, code-point-safe reversal)
 
 `kotoba.lang.bounded-text` is the sovereign `.kotoba` kernel for the bounded
 portable subset used during CLJC migration: contains, starts/ends-with,
-replace-all, and case-fold. The CLJC namespace remains the
-general oracle for regex, collection-returning split, Unicode construction,
-formatting, trim, and padding until those surfaces have bounded compiler
-contracts. See `migration/bounded-text-v1.edn`.
+replace-all, case-fold, and (2026-09-04) trim/triml/trimr, blank?,
+reverse, repeat, index-of/last-index-of, and both pads — each composed from
+the language's string builtins (`string-code-point-at`, `string-substring`,
+`string-concat`, …), no new compiler operation. The CLJC namespace remains
+the general oracle for regex, collection-returning split, Unicode
+construction, formatting, upper/capitalize, and general-case trimming until
+those surfaces have bounded compiler contracts. See
+`migration/bounded-text-v1.edn`.
 
 ## Install
 
