@@ -240,3 +240,146 @@
 (defn trim-newline
   "Remove trailing newline (\\n) or carriage-return+newline (\\r\\n) from `s`."
   [s] (cstr/trim-newline s))
+
+;; ---------- bounded-kernel oracle (2026-09-04) ----------
+;;
+;; The `.kotoba` kernel (`bounded_text.kotoba`) now owns a trim/reverse/
+;; repeat/index/pad tranche composed from the language's string builtins.
+;; These CLJC functions are their ORACLE: same names modulo the `-text`
+;; suffix, same semantics INCLUDING the differences the bounded kernel
+;; names rather than hides -- ASCII-only whitespace (kernel `ws?`),
+;; UTF-8 byte offsets instead of UTF-16 code units (kernel index answers),
+;; and a fill string instead of a fill char (kernel pad). A caller migrating
+;; from `clojure.string` should meet the same divergence in both.
+
+(defn- ascii-ws?
+  "The kernel's whitespace class: ASCII space, tab, newline, CR, FF, VT.
+  Unicode spaces (U+00A0, U+3000, ...) are NOT whitespace here, where
+  clojure.string/trim's Character/isWhitespace answers for them."
+  [^long cp]
+  (contains? #{32 9 10 13 12 11} cp))
+
+(defn- codepoints-of
+  "Code points of s as a vector (text/codepoints, reused here so the oracle
+  and kernel walk the same sequence)."
+  [s]
+  (codepoints s))
+
+(defn trim-text
+  "Oracle for the kernel's trim-text: strips ASCII whitespace from both ends."
+  [s]
+  (let [cps (vec (codepoints-of s))
+        n (count cps)
+        lead (loop [i 0] (if (and (< i n) (ascii-ws? (nth cps i))) (recur (inc i)) i))
+        trail (loop [i (dec n)] (if (and (>= i 0) (ascii-ws? (nth cps i))) (recur (dec i)) i))]
+    (if (> lead trail) "" (from-codepoints (subvec cps lead (inc trail))))))
+
+(defn triml-text
+  "Oracle for the kernel's triml-text: strips ASCII whitespace from the left."
+  [s]
+  (let [cps (vec (codepoints-of s))
+        n (count cps)
+        lead (loop [i 0] (if (and (< i n) (ascii-ws? (nth cps i))) (recur (inc i)) i))]
+    (from-codepoints (subvec cps lead))))
+
+(defn trimr-text
+  "Oracle for the kernel's trimr-text: strips ASCII whitespace from the right."
+  [s]
+  (let [cps (vec (codepoints-of s))
+        n (count cps)
+        trail (loop [i (dec n)] (if (and (>= i 0) (ascii-ws? (nth cps i))) (recur (dec i)) i))]
+    (if (neg? trail) "" (from-codepoints (subvec cps 0 (inc trail))))))
+
+(defn blank-text?
+  "Oracle for the kernel's blank-text?: empty or ASCII whitespace only."
+  [s]
+  (= "" (trim-text s)))
+
+(defn reverse-text
+  "Oracle for the kernel's reverse-text: code-point-safe reversal (the kernel
+  walks UTF-8 code points; this walks code points too, so astral characters
+  survive -- unlike clojure.string/reverse on a surrogate pair). rseq, not
+  cstr/reverse: this namespace's own `reverse` wraps cstr/reverse, which is
+  string-shaped and would see a vector."
+  [s]
+  (from-codepoints (vec (rseq (vec (codepoints-of s))))))
+
+(defn repeat-text
+  "Oracle for the kernel's repeat-text: s repeated times times; zero or
+  negative times answer the empty string (clojure.core/repeat is lazy and
+  has no negative case)."
+  [s times]
+  (if (pos? times) (apply str (repeat times s)) ""))
+
+(defn- utf8-byte-offsets
+  "Byte offset of each code point index in cps (one past the end for the
+  count). The kernel's index answers are UTF-8 byte offsets; this is how the
+  oracle converts its code point indexes to the same units."
+  [cps]
+  (let [width (fn [cp] (cond (< cp 0x80) 1 (< cp 0x800) 2 (< cp 0x10000) 3 :else 4))]
+    (loop [i 0 acc 0 offsets [0]]
+      (if (= i (count cps))
+        offsets
+        (recur (inc i) (+ acc (width (nth cps i))) (conj offsets (+ acc (width (nth cps i)))))))))
+
+(defn index-of-text
+  "Oracle for the kernel's index-of-text: UTF-8 BYTE offset of the first
+  occurrence, or -1. clojure.string/index-of answers a UTF-16 code unit
+  index or nil; they agree only on ASCII."
+  [s value]
+  (let [cps (vec (codepoints-of s))
+        needle (vec (codepoints-of value))
+        n (count cps)
+        m (count needle)
+        offsets (utf8-byte-offsets cps)]
+    (loop [i 0]
+      (cond
+        (> (+ i m) n) -1
+        (= m 0) (nth offsets i)
+        (= (subvec cps i (+ i m)) needle) (nth offsets i)
+        :else (recur (inc i))))))
+
+(defn last-index-of-text
+  "Oracle for the kernel's last-index-of-text: UTF-8 BYTE offset of the last
+  occurrence, or -1 (clojure.string/last-index-of answers a UTF-16 index)."
+  [s value]
+  (let [cps (vec (codepoints-of s))
+        needle (vec (codepoints-of value))
+        n (count cps)
+        m (count needle)
+        offsets (utf8-byte-offsets cps)]
+    (loop [i 0 best -1]
+      (if (> i (- n m))
+        best
+        (recur (inc i)
+               (if (= (subvec cps i (+ i m)) needle)
+                 (nth offsets i)
+                 best))))))
+
+(defn pad-left-text
+  "Oracle for the kernel's pad-left-text: prepend fill until the string's
+  BYTE length reaches width. The kernel measures bytes; this measures code
+  points, which agree on ASCII fills -- the divergence the kernel names."
+  [s width fill]
+  (let [w (count (codepoints-of s))]
+    (if (>= w width)
+      s
+      (if (empty? fill)
+        s
+        (loop [acc s]
+          (if (>= (count (codepoints-of acc)) width)
+            acc
+            (recur (str fill acc))))))))
+
+(defn pad-right-text
+  "Oracle for the kernel's pad-right-text: append fill until width."
+  [s width fill]
+  (let [w (count (codepoints-of s))]
+    (if (>= w width)
+      s
+      (if (empty? fill)
+        s
+        (loop [acc s]
+          (if (>= (count (codepoints-of acc)) width)
+            acc
+            (recur (str acc fill))))))))
