@@ -383,3 +383,103 @@
           (if (>= (count (codepoints-of acc)) width)
             acc
             (recur (str acc fill))))))))
+
+;; ---------- tranche-2 kernel oracles (2026-09-04) ----------
+
+(defn- byte-index->codepoint-index
+  "The kernel's index answers are UTF-8 byte offsets; convert one to a code
+  point index for the slicing oracles (nil when the offset is not a boundary
+  or is past the end -- the kernel never answers one of those)."
+  [cps byte-offset]
+  (loop [i 0 acc 0]
+    (cond
+      (= i (count cps)) (when (= acc byte-offset) i)
+      (= acc byte-offset) i
+      :else (recur (inc i)
+                   (+ acc (let [cp (nth cps i)]
+                            (cond (< cp 0x80) 1 (< cp 0x800) 2
+                                  (< cp 0x10000) 3 :else 4)))))))
+
+(defn replace-first-text
+  "Oracle for the kernel's replace-first-text: replace the FIRST occurrence
+  of the literal match. Not regex -- the kernel matches literals, so this
+  diverges from clojure.string/replace (which takes a pattern)."
+  [s match replacement]
+  (let [cps (vec (codepoints-of s))
+        mcps (vec (codepoints-of match))
+        rcps (vec (codepoints-of replacement))
+        n (count cps) m (count mcps)]
+    (loop [i 0]
+      (cond
+        (> (+ i m) n) s
+        (= m 0) s
+        (= (subvec cps i (+ i m)) mcps)
+        (from-codepoints (vec (concat (subvec cps 0 i) rcps (subvec cps (+ i m)))))
+        :else (recur (inc i))))))
+
+(defn trim-newline-text
+  "Oracle for the kernel's trim-newline-text: remove ONE trailing \\n or
+  \\r\\n (clojure.string/trim-newline semantics)."
+  [s]
+  (if (cstr/ends-with? s "\n")
+    (if (cstr/ends-with? s "\r\n")
+      (subs s 0 (- (count s) 2))
+      (subs s 0 (- (count s) 1)))
+    s))
+
+(defn- split-literal
+  "Split s on the LITERAL separator (no regex), portable. The kernel's
+  segment face over the same walk its index-of does."
+  [s sep]
+  (if (empty? sep)
+    [s]
+    (loop [i 0 start 0 parts []]
+      (if (> (+ i (count sep)) (count s))
+        (conj parts (subs s start))
+        (if (= (subs s i (+ i (count sep))) sep)
+          (recur (+ i (count sep)) (+ i (count sep))
+                 (conj parts (subs s start i)))
+          (recur (inc i) start parts))))))
+
+(defn segment-count-text
+  "Oracle for the kernel's segment-count-text: how many separator-delimited
+  segments the text has (separators + 1). Matches
+  clojure.string/split's count for non-regex separators."
+  [s sep]
+  (if (empty? sep)
+    0
+    (count (split-literal s sep))))
+
+(defn segment-text
+  "Oracle for the kernel's segment-text: the nth (0-based) separator-delimited
+  segment, or nil out of range (the kernel answers \"\" -- the divergence is
+  the SENTINEL only; the segment contents agree). Literal separator, no
+  regex."
+  [s sep n]
+  (if (or (empty? sep) (neg? n))
+    nil
+    (let [parts (split-literal s sep)]
+      (when (< n (count parts))
+        (nth parts n)))))
+
+(defn pad-center-text
+  "Oracle for the kernel's pad-center-text: center by CODE POINT count; the
+  odd shortfall's extra unit lands on the RIGHT. The kernel measures BYTES
+  and pads by whole FILL strings, so with a multi-byte fill its result can
+  overshoot width -- this oracle cannot, which is the divergence the kernel
+  names (never split a fill vs never exceed the count)."
+  [s width fill]
+  (let [w (count (codepoints-of s))]
+    (if (>= w width)
+      s
+      (if (empty? fill)
+        s
+        (let [short (- width w)
+              left (quot short 2)]
+          (loop [acc s n left]
+            (if (zero? n)
+              (loop [a acc m (- short left)]
+                (if (zero? m)
+                  a
+                  (recur (str a fill) (dec m))))
+              (recur (str fill acc) (dec n)))))))))

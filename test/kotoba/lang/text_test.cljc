@@ -156,3 +156,53 @@
   (is (= (or (cstr/index-of "hello world" "world") -1) (t/index-of-text "hello world" "world")))
   (is (= (or (cstr/index-of "abc" "z") -1) (t/index-of-text "abc" "z")))
   (is (= 2 (t/index-of-text "kotoba" "to"))))
+
+;; ---------- tranche-2 kernel oracle (2026-09-04) ----------
+
+(deftest kernel-replace-first
+  (is (= "a+b-a" (t/replace-first-text "a-b-a" "-" "+")))
+  (is (= "abc" (t/replace-first-text "abc" "zz" "+")))
+  ;; only the FIRST occurrence
+  (is (= "X本語x日" (t/replace-first-text "日本語x日" "日" "X")))
+  ;; empty match never matches (kernel: string-substring of an empty needle
+  ;; window is a boundary slice, but index-of answers the first boundary --
+  ;; kernel contract: empty match returns s)
+  (is (= "abc" (t/replace-first-text "abc" "" "+"))))
+
+(deftest kernel-trim-newline
+  (is (= "hi" (t/trim-newline-text "hi\r\n")))
+  (is (= "hi" (t/trim-newline-text "hi\n")))
+  (is (= "hi" (t/trim-newline-text "hi")))
+  ;; interior newline untouched; only ONE removed
+  (is (= "a\nb" (t/trim-newline-text "a\nb")))
+  (is (= "a\n" (t/trim-newline-text "a\n\n")))
+  (is (= "" (t/trim-newline-text ""))))
+
+(deftest kernel-segment
+  (is (= "a" (t/segment-text "a,b,c" "," 0)))
+  (is (= "b" (t/segment-text "a,b,c" "," 1)))
+  (is (= "c" (t/segment-text "a,b,c" "," 2)))
+  (is (nil? (t/segment-text "a,b,c" "," 9)))
+  (is (nil? (t/segment-text "a,b,c" "," -1)))
+  (is (= 3 (t/segment-count-text "a,b,c" ",")))
+  (is (= 1 (t/segment-count-text "abc" ",")))
+  ;; multi-byte body, single-byte separator
+  (is (= "本x" (t/segment-text "x日本x" "日" 1)))
+  ;; multi-byte separator
+  (is (= "b" (t/segment-text "a・b・c" "・" 1))))
+
+(deftest kernel-pad-center
+  (is (= "**hi**" (t/pad-center-text "hi" 6 "*")))
+  ;; odd shortfall: extra unit on the RIGHT (kernel: extra BYTE right)
+  (is (= "*hi**" (t/pad-center-text "hi" 5 "*")))
+  ;; empty fill answers the input
+  (is (= "hi" (t/pad-center-text "hi" 6 "")))
+  ;; already wide enough
+  (is (= "hh" (t/pad-center-text "hh" 2 "x"))))
+
+(deftest kernel-oracle-agrees-with-clojure-string-tranche2
+  ;; ASCII contract both layers claim
+  (is (= (cstr/replace-first "a-b-a" "-" "+") (t/replace-first-text "a-b-a" "-" "+")))
+  (is (= (cstr/trim-newline "hi\r\n") (t/trim-newline-text "hi\r\n")))
+  (is (= (first (cstr/split "a,b,c" #",")) (t/segment-text "a,b,c" "," 0)))
+  (is (= (second (cstr/split "a,b,c" #",")) (t/segment-text "a,b,c" "," 1))))
