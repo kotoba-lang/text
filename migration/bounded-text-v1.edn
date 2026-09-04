@@ -18,7 +18,13 @@
   :trim-text :triml-text :trimr-text :blank-text?
   :reverse-text :repeat-text
   :index-of-text :last-index-of-text
-  :pad-left-text :pad-right-text]
+  :pad-left-text :pad-right-text
+  ;; 2026-09-04 tranche 2: replace-first (literal match), trim-newline,
+  ;; segment-text/segment-count-text (the slice-and-count face of a
+  ;; separator), pad-center (see :retained :pad-center for the fill
+  ;; overshoot contract)
+  :replace-first-text :trim-newline-text :segment-text
+  :segment-count-text :pad-center-text]
  :retained
  {:regex "Host regex is not part of the pure-product profile."
   :split "Collection-returning string split remains deferred in T4.2;
@@ -26,12 +32,31 @@
           rejects it as an unsupported KIR operation (measured 2026-08-02)."
   :unicode-construction "Requires bounded codepoint collection design."
   :format "Variadic formatting requires a bounded structural-argument API."
-  :trim-and-padding "The 2026-09-04 tranche covers trim/triml/trimr, blank?,
-          reverse, repeat and both pads, composed from the existing builtins.
-          What still cannot be written: upper-case and capitalize need
+  :trim-and-padding "Tranche 1 covered trim/triml/trimr, blank?, reverse, repeat and both
+          pads; tranche 2 (same day) adds replace-first, trim-newline,
+          segment-text/count and pad-center. upper-case and capitalize need
           per-character transformation with no construction route (strings
-          are immutable; there is no string-from-codepoint), and split needs
-          a collection return. Those remain language work, not library work."
+          are immutable; there is no string-from-codepoint) -- that half
+          landed as the string-upper LANGUAGE operation on 2026-09-04 (sema
+          145e8b5, kir 29163c9, wasm 255c4dd, amu d90665c7). split's
+          collection return remains language work."
+  :join-text "DEFERRED, measured 2026-09-04: join needs to walk a
+          caller-built collection of strings, and this backend admits no
+          readable one. typed-list-new lowers on wasm32 but typed-list-nth
+          is not qualified there (typed Wasm operation is not qualified);
+          the heterogeneous vector refuses :string items (value type is
+          outside the safe profile); the legacy pair chain is typed :i64 per
+          the frontend's own comment and [:pair :string] is refused the same
+          way. segment-text/segment-count-text were landed instead: the two
+          single-string/i64 faces of a separator that callers actually reach
+          for. join-text is a version bump with its oracle when a readable
+          string collection lands."
+  :pad-center "Pads by whole FILL strings against byte budgets: the last
+          append can overshoot width by up to fill-size - 1 bytes (a fill is
+          never split), and the overshoot lands on the RIGHT, where the odd
+          single-byte shortfall goes too. Both pinned by golden vectors. The
+          CLJC oracle counts code points and cannot overshoot; the divergence
+          is the multi-byte-fill case only."
   :index-units "Kernel index-of/last-index-of answer UTF-8 BYTE offsets at
           code point boundaries. clojure.string answers UTF-16 code unit
           indexes. They agree on ASCII and diverge on multi-byte text; both
@@ -80,4 +105,10 @@
     "pad-left/right incl. overflow, empty fill"]
    :oracle "nbb --classpath src:test test/run_portable.cljs: 24 tests /
             122 assertions, 0 failures; clojure -M:test: 27 tests / 161
-            assertions, 0 failures (JVM extra: format_parity)"}}}
+            assertions, 0 failures (JVM extra: format_parity)"}}
+ :tranche-2026-09-04-2
+ {:route "amu check src/kotoba/lang/bounded_text.kotoba --jvm-free, exit 0"
+  :wasm32 "amu compile --target wasm32 --jvm-free, exit 0; instantiated through amu runtime/browser-host.mjs, golden main() = 42 over a 17-check chain covering every export incl. the multi-byte replace-first and segment cases"
+  :en-route "FOUR defects, three mine and one real, each caught by a wasm32 golden run or its isolation: (1) my replace-first multi-byte expectation wrote a replace-ALL answer (X本語xX) for a replace-FIRST operation (X本語x日); (2) my segment expectation ignored the 3-byte separator (segment 1 of x日本x by 日 is 本x, not x); (3) my pad-center golden ignored the never-split-a-fill overshoot (hi w3 fill ab is hiab, not hi); and the REAL one -- seg-after returned the text AFTER n separators without cutting at the next, answering segment 1 of a,b,c with b,c. Fixed by cut-at-sep at the base case."
+  :oracle "nbb 29 tests / 149 assertions, 0 failures; JVM 32 tests / 188 assertions, 0 failures; clj-kondo 0 errors"}
+}

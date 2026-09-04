@@ -29,16 +29,24 @@ kotoba-WASM). Regex uses the host's `#"...";` pure string ops are portable. See
   `pad-left-text` / `pad-right-text`: the CLJC oracle for the same operations
   as the `.kotoba` kernel, with the divergences the kernel names (UTF-8 byte
   offsets, ASCII whitespace class, code-point-safe reversal)
+- tranche-2 oracles — `replace-first-text` (literal match, not regex) /
+  `trim-newline-text` / `segment-text` / `segment-count-text` (the
+  slice-and-count face of a separator; no collection return needed) /
+  `pad-center-text`
 
 `kotoba.lang.bounded-text` is the sovereign `.kotoba` kernel for the bounded
 portable subset used during CLJC migration: contains, starts/ends-with,
-replace-all, case-fold, and (2026-09-04) trim/triml/trimr, blank?,
-reverse, repeat, index-of/last-index-of, and both pads — each composed from
-the language's string builtins (`string-code-point-at`, `string-substring`,
-`string-concat`, …), no new compiler operation. The CLJC namespace remains
-the general oracle for regex, collection-returning split, Unicode
-construction, formatting, upper/capitalize, and general-case trimming until
-those surfaces have bounded compiler contracts. See
+replace-all, case-fold, (2026-09-04) trim/triml/trimr, blank?,
+reverse, repeat, index-of/last-index-of, both pads, replace-first,
+trim-newline, segment-text/segment-count-text, and pad-center — each composed
+from the language's string builtins (`string-code-point-at`,
+`string-substring`, `string-concat`, …), no new compiler operation.
+join-text is deferred with a measured reason (no readable string collection
+on wasm32; see the migration record). The CLJC namespace remains the general
+oracle for regex, collection-returning split, Unicode construction,
+formatting, upper/capitalize, and general-case trimming until those surfaces
+have bounded compiler contracts — upper/capitalize landed as the
+`string-upper` LANGUAGE operation the same day. See
 `migration/bounded-text-v1.edn`.
 
 ## Install
