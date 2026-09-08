@@ -10,6 +10,38 @@ kotoba-WASM). `kotoba.lang.bounded-regex` is a bounded, backtracking-free regex 
 `#"..."` as the general oracle. Pure string ops are portable. See
 [`docs/adr/ADR-kotoba-lang-foundational-stdlib.md`](https://github.com/kotoba-lang/kotoba-lang/blob/main/docs/adr/ADR-kotoba-lang-foundational-stdlib.md).
 
+## Three names, one library
+
+`kotoba.lang.text` is the implementation. **`kotoba.text` and `kotoba.string`
+are aliases of it** — every var in them IS the var in `kotoba.lang.text`, not a
+copy (owner decision, 2026-09-08).
+
+Three names existed because two places already pointed at two of them and
+neither pointed at the third:
+
+| name | what pointed at it before this |
+|---|---|
+| `kotoba.lang.text` | the implementation, and the only one that resolved |
+| `kotoba.text` | root ADR-2609040930's replacement-router table routes `clojure.string` here — **it did not exist** |
+| `kotoba.string` | the guest `.kotoba` plane in `kotoba-lang/kotoba-lang`, where the owner named it canonical |
+
+Retiring two of the three would have meant rewriting call sites that are not
+wrong. So they alias, and the router's row is now true rather than aspirational.
+
+An alias list written by hand goes stale silently — someone adds a function to
+the canonical namespace, nobody adds it to the aliases, and the aliases become
+a subset that still passes every test anyone runs. So it is checked, not
+trusted: `kotoba.lang.text-alias-test` asserts on the JVM that the public
+surface of each alias is EXACTLY the canonical surface and that each var is
+`identical?` to its canonical var. Deleting one `def` makes it say
+`kotoba.text is missing (truncate)`; re-implementing one instead of aliasing it
+makes it say `kotoba.string/upper is a COPY`. Both were measured, not assumed.
+ClojureScript has no runtime var reflection, so the portable half calls each
+name through all three namespaces and requires the three answers to agree.
+
+The aliases carry no docstrings or arglists: `def` copies the value, not the
+metadata. The documentation lives at `kotoba.lang.text`.
+
 ## Current surface
 
 `kotoba.lang.text`:
