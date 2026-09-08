@@ -65,3 +65,4 @@
 (def segment-count-text text/segment-count-text)
 (def segment-text text/segment-text)
 (def pad-center-text text/pad-center-text)
+(def escape text/escape)
