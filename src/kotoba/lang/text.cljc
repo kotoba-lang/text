@@ -7,50 +7,340 @@
 
   Zero third-party runtime deps; .cljc."
   (:refer-clojure :exclude [format split join replace re-find re-matches re-seq
-                            reverse])
-  (:require [clojure.string :as cstr]))
+                            reverse]))
+
+;; ---------------------------------------------------------------------------
+;; Self-hosted. This namespace does NOT require clojure.string.
+;; ---------------------------------------------------------------------------
+;;
+;; It used to. Delegating was the honest first move -- it made the surface
+;; complete without claiming semantics nobody had written down. But it meant
+;; that "migrate the workspace to kotoba.*" bought a rename and nothing else:
+;; the host dependency was still there, one layer down, in the one place every
+;; caller reached through.
+;;
+;; Two things a delegating wrapper cannot do, which are the reason this is
+;; worth the code:
+;;
+;;   1. `clojure.string` DOES NOT MEAN THE SAME THING ON ITS TWO HOSTS, and a
+;;      wrapper inherits the disagreement silently. `trim` is the clearest
+;;      case: on the JVM it strips what `Character/isWhitespace` accepts, which
+;;      EXCLUDES the non-breaking spaces U+00A0, U+2007 and U+202F and INCLUDES
+;;      the C0 separators U+001C-U+001F. On ClojureScript it is
+;;      `goog.string/trim`, i.e. /[\s\xa0]+/, which is the other way round on
+;;      both counts. The same call, the same input, two answers. Below, the
+;;      whitespace class is a named, closed set, so there is one answer.
+;;
+;;   2. Nothing downstream can be compiled for a target that has no
+;;      `clojure.string` at all.
+;;
+;; Where the two hosts disagreed, this namespace adopts the JVM answer and
+;; pins it in a test, because that is what the existing call sites were
+;; written against. Every divergence is named in the docstring of the function
+;; it affects -- none of it is discovered at a call site.
+;;
+;; Regex stays host regex (`#"..."`). That was never clojure.string's; the
+;; `match-spans` primitive below reaches the host's own matcher directly, so
+;; `split`/`replace` are built here rather than delegated.
+
+;; ---------- the host's regex matcher, and nothing else from the host --------
+
+(defn- match-spans
+  "Every non-overlapping match of `re` in `s`, in order, as
+  `{:start i :end j :groups [whole g1 g2 ...]}` with character indices.
+
+  This is the single point where this namespace touches the host's regex
+  engine. A zero-length match advances by one character, exactly as
+  `java.util.regex.Matcher/find` does, so `#\"\"` against \"ab\" yields three
+  empty matches (before a, before b, at the end) on both hosts rather than
+  looping forever on one of them."
+  [re s]
+  #?(:clj
+     (let [m (re-matcher re s)]
+       (loop [acc []]
+         (if (.find m)
+           (recur (conj acc {:start  (.start m)
+                             :end    (.end m)
+                             :groups (mapv #(.group m ^int %)
+                                           (range (inc (.groupCount m))))}))
+           acc)))
+     :cljs
+     (let [flags (.-flags re)
+           g     (js/RegExp. (.-source re)
+                             (if (.includes flags "g") flags (str flags "g")))]
+       (loop [acc []]
+         (let [m (.exec g s)]
+           (if (nil? m)
+             acc
+             (let [start (.-index m)
+                   whole (aget m 0)
+                   end   (+ start (.-length whole))]
+               (when (= start end)
+                 (set! (.-lastIndex g) (inc start)))
+               (recur (conj acc {:start  start
+                                 :end    end
+                                 :groups (mapv #(aget m %) (range (.-length m)))})))))))))
 
 ;; ---------- split / join ----------
 
+(defn join
+  "Join `coll` with separator `sep`. With one argument, joins with no
+  separator. `nil` elements render as the empty string, like `str`."
+  ([coll] (apply str coll))
+  ([sep coll] (apply str (interpose sep coll))))
+
 (defn split
-  "Split `s` on regex `re`, returning a vector of substrings."
-  [s re] (cstr/split s re))
+  "Split `s` on regex `re`, returning a vector of substrings.
+
+  `java.util.regex.Pattern/split` semantics, reimplemented rather than
+  delegated:
+
+  * `limit` absent or 0 -- trailing empty strings are removed.
+  * `limit` positive -- at most `limit` parts; the last one is the whole
+    remainder, unsplit.
+  * `limit` negative -- all parts, trailing empties kept.
+  * a zero-width match at index 0 does not produce a leading empty string.
+  * no match anywhere yields `[s]`, never `[]`."
+  ([s re] (split s re 0))
+  ([s re limit]
+   (let [s       (str s)
+         limited (pos? limit)
+         spans   (match-spans re s)]
+     (loop [spans spans, index 0, parts []]
+       (if-let [{:keys [start end]} (first spans)]
+         (cond
+           ;; a zero-width match at the very beginning contributes nothing
+           (and (zero? index) (zero? start) (= start end))
+           (recur (next spans) index parts)
+
+           (and limited (= (count parts) (dec limit)))
+           (recur nil index parts)
+
+           (or (not limited) (< (count parts) (dec limit)))
+           (recur (next spans) end (conj parts (subs s index start)))
+
+           :else (recur nil index parts))
+         (if (and (zero? index) (empty? parts))
+           [s]
+           (let [parts (conj parts (subs s index))]
+             (if (zero? limit)
+               (loop [p parts]
+                 (if (and (seq p) (= "" (peek p))) (recur (pop p)) p))
+               parts))))))))
 
 (defn split-lines
-  "Split `s` into lines (handles \\n, \\r, \\r\\n)."
-  [s] (cstr/split-lines s))
-
-(defn join
-  "Join `coll` with separator `sep`."
-  [sep coll] (cstr/join sep coll))
+  "Split `s` on \\n or \\r\\n. Exactly `clojure.string/split-lines`, which is
+  `(split s #\"\\r?\\n\")` -- so a LONE carriage return is not a separator, and
+  the trailing empty strings a final newline would produce are dropped."
+  [s]
+  (split (str s) #"\r?\n"))
 
 ;; ---------- trim ----------
 
-(defn trim  [s] (cstr/trim s))
-(defn triml [s] (cstr/triml s))
-(defn trimr [s] (cstr/trimr s))
+(defn- java-whitespace?
+  "The whitespace class this namespace trims: exactly what
+  `java.lang.Character/isWhitespace` accepts, written out.
+
+  Included: the C0 controls U+0009-U+000D and the four separators
+  U+001C-U+001F, SPACE, and the Unicode space separators.
+  DELIBERATELY EXCLUDED: the non-breaking spaces U+00A0, U+2007 and U+202F --
+  Java does not consider them whitespace, JavaScript's `\\s` does, and this
+  namespace answers the same on both hosts by choosing Java's."
+  [ch]
+  (let [c #?(:clj (int ch) :cljs (.charCodeAt (str ch) 0))]
+    (or (<= 9 c 13)
+        (<= 28 c 31)
+        (= c 32)
+        (= c 0x1680)
+        (<= 0x2000 c 0x2006)
+        (<= 0x2008 c 0x200A)
+        (= c 0x2028)
+        (= c 0x2029)
+        (= c 0x205F)
+        (= c 0x3000))))
+
+(defn trim
+  "Remove whitespace from both ends of `s`. See `java-whitespace?` for the
+  class, which is Java's and is the same on every host here."
+  [s]
+  (let [s (str s)
+        n (count s)]
+    (loop [r n]
+      (if (zero? r)
+        ""
+        (if (java-whitespace? (nth s (dec r)))
+          (recur (dec r))
+          (loop [l 0]
+            (if (java-whitespace? (nth s l))
+              (recur (inc l))
+              (subs s l r))))))))
+
+(defn triml
+  "Remove whitespace from the left end of `s`."
+  [s]
+  (let [s (str s) n (count s)]
+    (loop [l 0]
+      (if (and (< l n) (java-whitespace? (nth s l)))
+        (recur (inc l))
+        (subs s l)))))
+
+(defn trimr
+  "Remove whitespace from the right end of `s`."
+  [s]
+  (let [s (str s)]
+    (loop [r (count s)]
+      (if (and (pos? r) (java-whitespace? (nth s (dec r))))
+        (recur (dec r))
+        (subs s 0 r)))))
 
 ;; ---------- case ----------
 
-(defn upper      [s] (cstr/upper-case s))
-(defn lower      [s] (cstr/lower-case s))
-(defn capitalize [s] (cstr/capitalize s))
+(defn upper
+  "Upper-case `s` using the host's default locale, like
+  `clojure.string/upper-case`."
+  [s] #?(:clj (.toUpperCase ^String (str s)) :cljs (.toUpperCase (str s))))
+
+(defn lower
+  "Lower-case `s` using the host's default locale."
+  [s] #?(:clj (.toLowerCase ^String (str s)) :cljs (.toLowerCase (str s))))
+
+(defn capitalize
+  "Upper-case the first character of `s` and lower-case the rest."
+  [s]
+  (let [s (str s)]
+    (if (< (count s) 2)
+      (upper s)
+      (str (upper (subs s 0 1)) (lower (subs s 1))))))
 
 ;; ---------- predicates ----------
 
-(defn starts-with? [s prefix] (cstr/starts-with? s prefix))
-(defn ends-with?   [s suffix] (cstr/ends-with? s suffix))
-(defn includes?    [s sub]    (cstr/includes? s sub))
+(defn starts-with? [s prefix]
+  #?(:clj  (.startsWith ^String (str s) ^String (str prefix))
+     :cljs (.startsWith (str s) (str prefix))))
 
-;; ---------- regex (host) ----------
+(defn ends-with? [s suffix]
+  #?(:clj  (.endsWith ^String (str s) ^String (str suffix))
+     :cljs (.endsWith (str s) (str suffix))))
+
+(defn includes? [s sub]
+  #?(:clj  (.contains ^String (str s) ^CharSequence (str sub))
+     :cljs (not= -1 (.indexOf (str s) (str sub)))))
+
+;; ---------- regex-driven rewriting ----------
+
+(defn- expand-template
+  "Expand a replacement TEMPLATE against one match's `groups`, using
+  `java.util.regex.Matcher` rules:
+
+  * `$N` is group N. Digits are consumed greedily while the number they form
+    is still a group the pattern has, so with one group `$12` means group 1
+    followed by a literal `2` -- Java's rule, reproduced rather than
+    approximated.
+  * a reference to a group the pattern does NOT have is refused. Java throws
+    IndexOutOfBoundsException here; refusing is better than silently expanding
+    to the empty string, which turns a template typo into missing output. The
+    refusal is an ex-info with a `:type`, not a host exception class, so a
+    caller can catch it the same way on every host.
+  * a group the pattern HAS but that did not participate in this match
+    expands to nothing -- also Java's behaviour, and not the same case.
+  * `\\$` is a literal `$`, `\\\\` a literal backslash.
+
+  Deliberately NOT the ClojureScript behaviour: there, clojure.string hands
+  the template to JS `String.replace`, which also understands `$&`, ``$` ``
+  and `$'`. Here those are ordinary text on every host."
+  [template groups]
+  (let [t           (str template)
+        n           (count t)
+        group-count (dec (count groups))
+        digit-at    (fn [j]
+                      (when (< j n)
+                        (let [c #?(:clj (int (nth t j)) :cljs (.charCodeAt t j))]
+                          (when (<= 48 c 57) (- c 48)))))]
+    (loop [i 0, out []]
+      (if (>= i n)
+        (apply str out)
+        (let [c (nth t i)]
+          (cond
+            (and (= c \\) (< (inc i) n))
+            (recur (+ i 2) (conj out (nth t (inc i))))
+
+            (and (= c \$) (digit-at (inc i)))
+            (let [first-digit (digit-at (inc i))]
+              (when (> first-digit group-count)
+                (throw (ex-info (str "no group " first-digit " in the pattern")
+                                {:type :text/no-such-group
+                                 :group first-digit
+                                 :group-count group-count
+                                 :template t})))
+              ;; grow the reference while it still names a real group
+              (let [[ref end-idx]
+                    (loop [ref first-digit, j (+ i 2)]
+                      (let [d     (digit-at j)
+                            grown (when d (+ (* ref 10) d))]
+                        (if (and grown (<= grown group-count))
+                          (recur grown (inc j))
+                          [ref j])))]
+                (recur end-idx (conj out (or (get groups ref) "")))))
+
+            :else (recur (inc i) (conj out c))))))))
+
+(defn- replacement-for
+  "The text one REGEX match contributes: a function is called with the match
+  (the whole match when the pattern has no groups, the group vector when it
+  has), a string is expanded as a template."
+  [replacement groups]
+  (if (fn? replacement)
+    (str (replacement (if (= 1 (count groups)) (first groups) groups)))
+    (expand-template replacement groups)))
+
+(defn- rewrite
+  "Shared engine for `replace` and `replace-first`."
+  [s match replacement all?]
+  (let [s (str s)]
+    (if (string? match)
+      ;; a literal match needs no regex at all
+      (if (empty? match)
+        s
+        (loop [i 0, out []]
+          (let [hit (loop [j i]
+                      (cond
+                        (> (+ j (count match)) (count s)) nil
+                        (= (subs s j (+ j (count match))) match) j
+                        :else (recur (inc j))))]
+            (if (nil? hit)
+              (apply str (conj out (subs s i)))
+              ;; A string match is LITERAL on both sides: clojure.string
+              ;; routes it to String.replace, so `$1` in the replacement is a
+              ;; dollar and a one, not a group reference. Only a regex match
+              ;; gets template expansion.
+              (let [out (conj out (subs s i hit)
+                              (if (fn? replacement)
+                                (str (replacement match))
+                                (str replacement)))
+                    i'  (+ hit (count match))]
+                (if all?
+                  (recur i' out)
+                  (apply str (conj out (subs s i')))))))))
+      (let [spans (match-spans match s)
+            spans (if all? spans (take 1 spans))]
+        (loop [spans spans, index 0, out []]
+          (if-let [{:keys [start end groups]} (first spans)]
+            (recur (next spans) end
+                   (conj out (subs s index start)
+                         (replacement-for replacement groups)))
+            (apply str (conj out (subs s index)))))))))
 
 (defn replace
-  "Replace all matches of `re` in `s` with `replacement` (string or fn)."
-  [s re replacement] (cstr/replace s re replacement))
+  "Replace all matches of `match` in `s` with `replacement`.
+
+  `match` is a regex or a literal string; `replacement` is a string template
+  (see `expand-template` for the `$N` rules, which are the JVM's) or a
+  function of the match."
+  [s match replacement] (rewrite s match replacement true))
 
 (defn replace-first
-  "Replace the first match of `re` in `s` with `replacement`."
-  [s re replacement] (cstr/replace-first s re replacement))
+  "Replace the first match of `match` in `s` with `replacement`."
+  [s match replacement] (rewrite s match replacement false))
 
 (defn re-find    [re s] (#?(:clj clojure.core/re-find :cljs cljs.core/re-find) re s))
 (defn re-matches [re s] (#?(:clj clojure.core/re-matches :cljs cljs.core/re-matches) re s))
@@ -104,8 +394,8 @@
      :cljs (.toString (long n) 16)))
 
 (defn- fmt-one [{:keys [flags width prec conv]} arg]
-  (let [left? (cstr/includes? flags "-")
-        zero? (and (cstr/includes? flags "0") (not left?))
+  (let [left? (includes? flags "-")
+        zero? (and (includes? flags "0") (not left?))
         body (case conv
                ;; clojure.core/format renders nil as "null" (it defers to
                ;; String.valueOf), not as the empty string that `str` gives.
@@ -120,7 +410,7 @@
                "c" (str (char (if (number? arg) (long arg) arg)))
                "b" (str (boolean arg))
                (str "%" conv))
-        body (if (and (cstr/includes? flags "+") (#{"d" "f"} conv) (not (cstr/starts-with? body "-")))
+        body (if (and (includes? flags "+") (#{"d" "f"} conv) (not (starts-with? body "-")))
                (str "+" body) body)]
     (if width (pad body width left? (if zero? \0 \space)) body)))
 
@@ -199,8 +489,8 @@
 
 ;; ---------- padding / truncate ----------
 
-(defn pad-left  [s width ch] (let [pad (max 0 (- width (count s)))] (str (cstr/join (repeat pad ch)) s)))
-(defn pad-right [s width ch] (let [pad (max 0 (- width (count s)))] (str s (cstr/join (repeat pad ch)))))
+(defn pad-left  [s width ch] (let [pad (max 0 (- width (count s)))] (str (join (repeat pad ch)) s)))
+(defn pad-right [s width ch] (let [pad (max 0 (- width (count s)))] (str s (join (repeat pad ch)))))
 
 (defn truncate
   "Truncate `s` to `max-len` chars. If `ellipsis` is given and `s` is longer
@@ -218,28 +508,46 @@
 
 (defn blank?
   "True if `s` is nil, empty, or contains only whitespace."
-  [s] (cstr/blank? s))
+  [s] (or (nil? s) (= "" (trim s))))
 
 (defn index-of
   "Index of the first occurrence of `value` (string or char) in `s`, from
   `from-index` if given, or nil if not found."
-  ([s value] (cstr/index-of s value))
-  ([s value from-index] (cstr/index-of s value from-index)))
+  ([s value] (index-of s value 0))
+  ([s value from-index]
+   (let [i #?(:clj  (.indexOf ^String (str s) ^String (str value) (int from-index))
+              :cljs (.indexOf (str s) (str value) from-index))]
+     (when-not (neg? i) i))))
 
 (defn last-index-of
   "Index of the last occurrence of `value` (string or char) in `s`, searching
   backward from `from-index` if given, or nil if not found."
-  ([s value] (cstr/last-index-of s value))
-  ([s value from-index] (cstr/last-index-of s value from-index)))
+  ([s value]
+   (let [i #?(:clj  (.lastIndexOf ^String (str s) ^String (str value))
+              :cljs (.lastIndexOf (str s) (str value)))]
+     (when-not (neg? i) i)))
+  ([s value from-index]
+   (let [i #?(:clj  (.lastIndexOf ^String (str s) ^String (str value) (int from-index))
+              :cljs (.lastIndexOf (str s) (str value) from-index))]
+     (when-not (neg? i) i))))
 
 (defn reverse
-  "Reverse the characters of `s`. Codepoint-naive (like clojure.string/reverse):
-  use `codepoints`/`from-codepoints` for a surrogate-pair-safe reversal."
-  [s] (cstr/reverse s))
+  "Reverse `s`, keeping surrogate pairs intact -- an astral character comes
+  back whole, not as two swapped halves. That matches the JVM's
+  `clojure.string/reverse`, which is `StringBuilder.reverse` and is documented
+  to treat a surrogate pair as one unit; a naive per-code-unit reversal would
+  produce two unpaired surrogates and is what this used to do."
+  [s] (from-codepoints (vec (rseq (vec (codepoints (str s)))))))
 
 (defn trim-newline
   "Remove trailing newline (\\n) or carriage-return+newline (\\r\\n) from `s`."
-  [s] (cstr/trim-newline s))
+  [s]
+  (let [s (str s)]
+    (cond
+      (ends-with? s "\r\n") (subs s 0 (- (count s) 2))
+      (ends-with? s "\n")    (subs s 0 (dec (count s)))
+      (ends-with? s "\r")    (subs s 0 (dec (count s)))
+      :else s)))
 
 ;; ---------- bounded-kernel oracle (2026-09-04) ----------
 ;;
@@ -299,7 +607,7 @@
   "Oracle for the kernel's reverse-text: code-point-safe reversal (the kernel
   walks UTF-8 code points; this walks code points too, so astral characters
   survive -- unlike clojure.string/reverse on a surrogate pair). rseq, not
-  cstr/reverse: this namespace's own `reverse` wraps cstr/reverse, which is
+  rseq, not this namespace's own `reverse`, which is
   string-shaped and would see a vector."
   [s]
   (from-codepoints (vec (rseq (vec (codepoints-of s))))))
@@ -421,8 +729,8 @@
   "Oracle for the kernel's trim-newline-text: remove ONE trailing \\n or
   \\r\\n (clojure.string/trim-newline semantics)."
   [s]
-  (if (cstr/ends-with? s "\n")
-    (if (cstr/ends-with? s "\r\n")
+  (if (ends-with? s "\n")
+    (if (ends-with? s "\r\n")
       (subs s 0 (- (count s) 2))
       (subs s 0 (- (count s) 1)))
     s))

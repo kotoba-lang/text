@@ -17,11 +17,13 @@
 (require '[cljs.test :as t]
          '[kotoba.lang.format-test]
          '[kotoba.lang.text-test]
-         '[kotoba.lang.text-alias-test])
+         '[kotoba.lang.text-alias-test]
+         '[kotoba.lang.text-parity-test])
 
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (when-not (t/successful? m) (set! (.-exitCode js/process) 1)))
 
 (t/run-tests 'kotoba.lang.format-test
              'kotoba.lang.text-test
-             'kotoba.lang.text-alias-test)
+             'kotoba.lang.text-alias-test
+             'kotoba.lang.text-parity-test)
