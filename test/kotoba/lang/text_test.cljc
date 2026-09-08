@@ -206,3 +206,52 @@
   (is (= (cstr/trim-newline "hi\r\n") (t/trim-newline-text "hi\r\n")))
   (is (= (first (cstr/split "a,b,c" #",")) (t/segment-text "a,b,c" "," 0)))
   (is (= (second (cstr/split "a,b,c" #",")) (t/segment-text "a,b,c" "," 1))))
+
+;; ---------- escape ----------
+
+(deftest escape-replaces-only-mapped-characters
+  (is (= "a&lt;b" (t/escape "a<b" {\< "&lt;"})))
+  (is (= "abc"    (t/escape "abc" {\< "&lt;"})))
+  ;; a character mapped to a character, not a string
+  (is (= "a_b"    (t/escape "a b" {\space \_}))))
+
+(deftest escape-is-single-pass-so-cmap-order-cannot-matter
+  ;; The discriminating case against the usual hand-rolled substitute, a
+  ;; chain of replace calls. `&` -> `&amp;` emits an `&`; a second pass over
+  ;; that output would escape it again and yield "&amp;amp;lt;".
+  (let [cmap {\& "&amp;" \< "&lt;"}]
+    (is (= "&amp;&lt;" (t/escape "&<" cmap)))
+    ;; the same map built in the other order gives the same answer
+    (is (= (t/escape "&<" {\< "&lt;" \& "&amp;"})
+           (t/escape "&<" cmap)))))
+
+(deftest escape-boundary-and-absent-input
+  ;; Questions 1 and 4 of the 8: empty input and an empty cmap must be
+  ;; distinguishable from "escaped nothing because it could not run".
+  (is (= "" (t/escape "" {\< "&lt;"})))
+  (is (= "abc" (t/escape "abc" {})))
+  ;; every character mapped -- the other boundary
+  (is (= "XYZ" (t/escape "abc" {\a "X" \b "Y" \c "Z"})))
+  ;; a mapping to the empty string deletes the character (not "no match")
+  (is (= "ac" (t/escape "abc" {\b ""}))))
+
+(deftest escape-walks-utf16-code-units-like-the-jvm-original
+  ;; A BMP character is one unit and is matched normally.
+  (is (= "[あ]" (t/escape "あ" {\あ "[あ]"})))
+  ;; A non-BMP character is two surrogate code units on both hosts, so a
+  ;; cmap keyed on the whole character does not match it -- pinned so that a
+  ;; later switch to codepoint iteration cannot land silently.
+  (is (= "𝄞" (t/escape "𝄞" {\< "&lt;"}))))
+
+(deftest escape-matches-clojure-string-escape
+  ;; Parity against the JVM/CLJS original this function replaces. Without
+  ;; this, the tests above only pin what I believed the semantics to be.
+  (doseq [[s cmap] [["a<b&c" {\< "&lt;" \& "&amp;"}]
+                    ["" {\< "&lt;"}]
+                    ["abc" {}]
+                    ["abc" {\b ""}]
+                    ["a b" {\space \_}]
+                    ["&<" {\& "&amp;" \< "&lt;"}]
+                    ["\u3042" {\u3042 "[a]"}]]]
+    (is (= (cstr/escape s cmap) (t/escape s cmap))
+        (pr-str [s cmap]))))

@@ -483,3 +483,38 @@
                   a
                   (recur (str a fill) (dec m))))
               (recur (str fill acc) (dec n)))))))))
+
+;; ---------- escape (clojure.string/escape) ----------
+;;
+;; The last clojure.string entry point this namespace did not carry. It is the
+;; one every HTML/CSV/shell-quoting call site in this workspace reaches for,
+;; and the hand-rolled substitutes for it are usually a chain of `replace`
+;; calls -- which is not the same function: a replace-chain re-scans its own
+;; output, so escaping `&` to `&amp;` and then `<` to `&lt;` double-escapes any
+;; `&` that the second replacement itself introduces. `escape` makes exactly
+;; one pass and never looks at what it has already emitted, which is why the
+;; order of entries in `cmap` cannot matter.
+;;
+;; Portability note: this walks UTF-16 code units, like clojure.string/escape.
+;; `(seq s)` yields Characters on the JVM and single-character strings on
+;; ClojureScript, and a `\<` literal in `cmap` reads as the matching type on
+;; each host, so the same `cmap` works on both. A character outside the BMP is
+;; two code units on both hosts and so is passed through as its two halves --
+;; the same as the JVM original. Do not "fix" that to be codepoint-based here;
+;; `codepoints`/`from-codepoints` above are the codepoint-level surface.
+
+(defn escape
+  "Return a new string, using `cmap` to escape each character `ch` of `s`:
+  if `(cmap ch)` is nil the character is appended unchanged, otherwise the
+  replacement (a string or character) is appended in its place. Mirrors
+  clojure.string/escape.
+
+  Single-pass: a replacement is never itself re-escaped, so the order of
+  entries in `cmap` is irrelevant.
+
+      (escape \"a<b&c\" {\\< \"&lt;\" \\& \"&amp;\"}) => \"a&lt;b&amp;c\""
+  [s cmap]
+  (let [s (str s)]
+    (if (empty? s)
+      s
+      (apply str (map (fn [ch] (let [r (get cmap ch)] (if (nil? r) ch r))) s)))))
