@@ -5,7 +5,9 @@
 **String / regex / unicode helpers** — the foundational-stdlib gap every other
 lib re-rolls (`json`, `lint`, `time` hand-roll string ops). Zero third-party
 deps; every namespace is `.cljc` (JVM / SCI / ClojureScript / GraalVM /
-kotoba-WASM). Regex uses the host's `#"...";` pure string ops are portable. See
+kotoba-WASM). `kotoba.lang.bounded-regex` is a bounded, backtracking-free regex engine a
+`.kotoba` guest can call; the `.cljc` wrappers below still use the host's
+`#"..."` as the general oracle. Pure string ops are portable. See
 [`docs/adr/ADR-kotoba-lang-foundational-stdlib.md`](https://github.com/kotoba-lang/kotoba-lang/blob/main/docs/adr/ADR-kotoba-lang-foundational-stdlib.md).
 
 ## Current surface
@@ -33,6 +35,58 @@ kotoba-WASM). Regex uses the host's `#"...";` pure string ops are portable. See
   `trim-newline-text` / `segment-text` / `segment-count-text` (the
   slice-and-count face of a separator; no collection return needed) /
   `pad-center-text`
+
+## Regex, in the guest
+
+`kotoba.lang.bounded-regex` (`src/kotoba/lang/bounded_regex.kotoba`) is a
+regex engine a `.kotoba` guest can actually call. Until it existed, every
+regex operation in this repo went through the host's `#"..."`, so a guest had
+none at all.
+
+Its absence was never a security decision. Root ADR-2608650000 classifies
+regex as `:not-yet-implemented`: it is in neither `:forbidden-heads` nor
+`lang/surface-status.edn`, and the one place `:regex` does appear --
+`lang/value-codec.edn`'s `:rejected-closed` -- says a compiled pattern cannot
+be transferred as a *value*, which is an encoding decision. A pattern here is
+a `:string` argument, so nothing new has to become encodable.
+
+What *is* a real constraint is backtracking, and it is met structurally rather
+than by a budget: the subset is group-free, so a branch is a linear chain of
+pieces, the state set is a bitmask in one `i64`, and one input code point
+advances all of it in a single forward walk. There is no backtracking stack to
+add. `O(n * m)` with `m <= 60` pieces per branch.
+
+| export | answer |
+|---|---|
+| `regex-valid?` | is this pattern inside the subset |
+| `regex-contains` | 1 / 0, one pass, `O(n * m)` -- the question grep asks |
+| `regex-match` | 1 / 0 for the whole input |
+| `regex-find-index` | leftmost match start in BYTES, or -1 |
+| `regex-match-end` | just past the longest match anchored at an offset, or -1 |
+| `regex-count` | non-overlapping matches |
+
+Supported: literals, `.`, `[...]` with ranges and negation, `\d \D \w \W
+\s \S \n \t \r` and escaped literals, `* + ?`, `^` and `$`, and top-level
+`|`. Refused -- as the error arm of `[:result :i64 :string]`, never as a `0`
+that would read like "no match": groups, backreferences, `{n,m}`, lookaround,
+non-greedy. Named divergences: `[]]` matches `]` (POSIX, grep and Python
+agree; JavaScript is the outlier), alternation is leftmost-longest, and the
+character classes are ASCII.
+
+Verify it by running the compiled artifact against the host's own RegExp:
+
+```bash
+node <amu>/bin/amu compile src/kotoba/lang/bounded_regex.kotoba \
+  --target web --policy scripts/bounded-regex-policy.edn --output /tmp/re.mjs
+nbb scripts/verify-bounded-regex.cljs /tmp/re.mjs
+```
+
+Exit 0 clean, 1 findings, 2 refused. The kernel's own `main` answers
+`failures * 1000 + checks-run`, so a build that ran nothing answers 0 rather
+than looking like a pass. Measured 2026-09-08 at amu `9092ee34`: compiles on
+both `web` and `wasm32`, self-check 47, 3901 comparisons clean. See
+`migration/bounded-regex-v1.edn` for the evidence, the divergences, and the
+measured backend cost that is *not* in this module.
 
 `kotoba.lang.bounded-text` is the sovereign `.kotoba` kernel for the bounded
 portable subset used during CLJC migration: contains, starts/ends-with,

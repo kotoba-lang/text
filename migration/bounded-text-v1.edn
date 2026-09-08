@@ -26,7 +26,14 @@
   :replace-first-text :trim-newline-text :segment-text
   :segment-count-text :pad-center-text]
  :retained
- {:regex "Host regex is not part of the pure-product profile."
+ {:regex "Superseded 2026-09-08. The sentence this entry used to carry --
+          \"Host regex is not part of the pure-product profile\" -- was true
+          about the HOST regex and was read as though it settled regex
+          itself. It did not: root ADR-2608650000 classifies regex as
+          :not-yet-implemented, not as a forbidden head. A bounded,
+          backtracking-free engine now lives in
+          src/kotoba/lang/bounded_regex.kotoba (migration/bounded-regex-v1.edn).
+          kotoba.lang.text keeps the host wrappers as the general oracle."
   :split "Collection-returning string split remains deferred in T4.2;
           string-split-count admits and runs on KIR/Wasm but restricted JS
           rejects it as an unsupported KIR operation (measured 2026-08-02)."
