@@ -15,7 +15,7 @@
 ;; does not declare one, and the self-check needs far more than that.
 
 (require '["fs" :as fs]
-         '[clojure.string :as str])
+         '[kotoba.lang.text :as str])
 
 (def artifact (first *command-line-args*))
 
