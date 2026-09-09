@@ -826,3 +826,54 @@
     (if (empty? s)
       s
       (apply str (map (fn [ch] (let [r (get cmap ch)] (if (nil? r) ch r))) s)))))
+
+;; ---------- re-quote ----------
+;;
+;; The seven call sites this was written for all hand-rolled the same thing:
+;;
+;;     (str/replace needle #"[.*+?^${}()|\[\]\\]" "\\$&")
+;;
+;; and that expression means two different things on the two hosts. In
+;; ClojureScript `clojure.string/replace` hands the template to JS
+;; `String.replace`, where `$&` is the whole match, so the result is
+;; backslash-then-metacharacter -- correct. On the JVM `$` must be followed by
+;; a digit, so the same source is an error; and under `expand-template` above,
+;; which deliberately does not implement `$&`, it expands to the two literal
+;; characters `$&` -- every escaped character becomes `$&` and the pattern
+;; silently stops matching what it was quoting. The `$1` spelling of the same
+;; idiom diverges the other way.
+;;
+;; So this is not a template that needs fixing seven times. It is a function
+;; that was missing: `clojure.string` has no regex quoter, and the two hosts'
+;; own answers -- `java.util.regex.Pattern/quote` and `goog.string/regExpEscape`
+;; -- are not interchangeable. `Pattern/quote` wraps the input in `\Q...\E`,
+;; which JavaScript's regex engine does not understand at all, so a pattern
+;; built with it on the JVM cannot be shipped to a browser.
+;;
+;; The escaped set is the intersection that is safe everywhere: each character
+;; below is a metacharacter in both engines, and `\<char>` is a legal escape in
+;; Java, in JavaScript, and in JavaScript's unicode (`u`) mode, which rejects
+;; identity escapes for anything outside this set. `-` is deliberately absent:
+;; it is only special inside a character class, and `\-` is NOT legal under
+;; `u`, so escaping it would trade a non-problem for a real one.
+
+(def ^:private regex-metacharacter-escapes
+  {\\ "\\\\" \^ "\\^" \$ "\\$" \. "\\." \| "\\|" \? "\\?" \* "\\*" \+ "\\+"
+   \( "\\(" \) "\\)" \[ "\\[" \] "\\]" \{ "\\{" \} "\\}"})
+
+(defn re-quote
+  "Return `s` escaped so that `(re-pattern (re-quote s))` matches `s` literally
+  and nothing else, on every host.
+
+  Use this instead of writing an escaping regex by hand: the usual hand-rolled
+  form uses a `$&` or `$1` replacement template, and those expand differently
+  on the JVM and in ClojureScript.
+
+      (re-quote \"a.b\")                  => \"a\\\\.b\"
+      (re-find (re-pattern (re-quote \"a.b\")) \"axb\") => nil
+
+  Unlike `java.util.regex.Pattern/quote` the result is an ordinary pattern
+  source with no `\\Q...\\E`, so it can be embedded in a larger pattern and
+  read by a JavaScript engine."
+  [s]
+  (escape (str s) regex-metacharacter-escapes))

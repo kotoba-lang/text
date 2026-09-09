@@ -66,3 +66,4 @@
 (def segment-text text/segment-text)
 (def pad-center-text text/pad-center-text)
 (def escape text/escape)
+(def re-quote text/re-quote)
