@@ -255,3 +255,63 @@
                     ["\u3042" {\u3042 "[a]"}]]]
     (is (= (cstr/escape s cmap) (t/escape s cmap))
         (pr-str [s cmap]))))
+
+(def ^:private metacharacters
+  ;; every character re-quote escapes, plus ones it must leave alone
+  (vec "\\^$.|?*+()[]{}-/&#@ aZ0\n\t"))
+
+(deftest re-quote-matches-the-literal-and-only-the-literal
+  (doseq [c metacharacters]
+    (let [s (str "x" c "y")
+          p (re-pattern (t/re-quote s))]
+      (is (= s (t/re-matches p s)) (pr-str [:matches-itself s]))
+      ;; the point of quoting: a metacharacter must stop being one. Two
+      ;; negatives are needed, and control B proved it -- dropping `.` from the
+      ;; escaped set left "xy" failing to match (`.` still needs one
+      ;; character), so a shorter-string negative alone reports a quoter that
+      ;; quotes nothing as correct. The same-length negative is what catches
+      ;; the single-character wildcards.
+      (is (nil? (t/re-matches p "xy")) (pr-str [:not-a-quantifier s]))
+      (when-not (= c \Z)
+        (is (nil? (t/re-matches p "xZy")) (pr-str [:not-a-wildcard s]))))))
+
+(deftest re-quote-embeds-in-a-larger-pattern
+  ;; the reason this returns pattern source rather than Pattern/quote's
+  ;; \Q...\E form: the seven call sites it replaces all concatenate.
+  (let [p (re-pattern (str "(?:^| )" (t/re-quote "O'Neil.") "(?:$|,)"))]
+    (is (some? (t/re-find p "by O'Neil.,")))
+    (is (nil?  (t/re-find p "by O'NeilX,")))))
+
+(deftest re-quote-is-idempotent-in-effect-not-in-text
+  ;; quoting twice is a different STRING but still matches the once-quoted
+  ;; text, so a double call is a bug that shows up as a failed match, never
+  ;; as a pattern that matches too much.
+  (let [once (t/re-quote "a.b")]
+    (is (= once (t/re-matches (re-pattern (t/re-quote once)) once)))))
+
+(deftest the-hand-rolled-idiom-this-replaces-is-host-divergent
+  ;; CONTROL. This is the expression the seven migrated call sites used:
+  ;;   (replace s #"[.*+?^${}()|\[\]\\]" "\\$&")
+  ;; Under clojure.string on ClojureScript it produces backslash-then-match.
+  ;; Under kotoba.lang.text -- on EVERY host -- `$&` is not a group reference,
+  ;; so it expands to the two literal characters, and the "escaped" pattern
+  ;; stops matching. If this assertion ever goes green as "\\.", expand-template
+  ;; grew $& support and this test, not the call sites, is what changed.
+  (is (= "a$&b" (t/replace "a.b" #"[.*+?^${}()|\[\]\\]" "\\$&")))
+  (is (nil? (t/re-find (re-pattern (t/replace "a.b" #"[.*+?^${}()|\[\]\\]" "\\$&"))
+                       "a.b")))
+  ;; and the $1 spelling of the same idiom, which is what two of the seven used
+  (is (= "a$1b" (t/replace "a.b" #"([.+*?\[\]^$(){}|\\])" "\\$1")))
+  ;; re-quote is the answer to both
+  (is (= "a\\.b" (t/re-quote "a.b")))
+  (is (some? (t/re-find (re-pattern (t/re-quote "a.b")) "a.b"))))
+
+#?(:cljs
+   (deftest re-quote-output-is-legal-under-the-unicode-flag
+     ;; JavaScript's `u` mode rejects identity escapes outside a fixed set --
+     ;; `\-` among them. This is why `-` is not in the escaped set; without
+     ;; this test that choice is just a comment.
+     (doseq [c metacharacters]
+       (let [s (str "x" c "y")]
+         (is (some? (.exec (js/RegExp. (t/re-quote s) "u") s))
+             (pr-str [:unicode-mode s]))))))
