@@ -1,4 +1,4 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; Runs the COMPILED bounded-regex kernel and compares it against an
 ;; INDEPENDENT oracle: the host's own RegExp. Not a mirror implementation --
 ;; a mirror written by the same hand would agree with the kernel's mistakes,
