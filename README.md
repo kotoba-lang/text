@@ -110,7 +110,7 @@ Verify it by running the compiled artifact against the host's own RegExp:
 ```bash
 node <amu>/bin/amu compile src/kotoba/lang/bounded_regex.kotoba \
   --target web --policy scripts/bounded-regex-policy.edn --output /tmp/re.mjs
-nbb scripts/verify-bounded-regex.cljk /tmp/re.mjs
+kbb --backend sci scripts/verify-bounded-regex.cljk /tmp/re.mjs
 ```
 
 Exit 0 clean, 1 findings, 2 refused. The kernel's own `main` answers
@@ -157,5 +157,5 @@ io.github.kotoba-lang/text {:git/sha "<sha>"}
 ## Verify
 
 ```sh
-clojure -M:test
+kbb -M:test
 ```

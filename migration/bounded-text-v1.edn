@@ -110,8 +110,8 @@
      (kö/ö=1, 日本語/本=3, 日本語のテキスト/テキスト=12)"
     "last-index-of incl. repeat and miss"
     "pad-left/right incl. overflow, empty fill"]
-   :oracle "nbb --classpath src:test test/run_portable.cljk: 24 tests /
-            122 assertions, 0 failures; clojure -M:test: 27 tests / 161
+   :oracle "kbb --backend sci --classpath src:test test/run_portable.cljk: 24 tests /
+            122 assertions, 0 failures; kbb -M:test: 27 tests / 161
             assertions, 0 failures (JVM extra: format_parity)"}}
  :tranche-2026-09-04-2
  {:route "amu check src/kotoba/lang/bounded_text.kotoba --jvm-free, exit 0"
