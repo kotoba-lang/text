@@ -76,7 +76,7 @@
 ;;     JavaScript's RegExp disagrees -- it reads `[]` as an empty class that
 ;;     matches nothing -- so a parity run against the host RegExp reports this
 ;;     as a mismatch. It is the host that is the outlier here, and the
-;;     divergence is asserted in scripts/verify-bounded-regex.cljs rather than
+;;     divergence is asserted in scripts/verify-bounded-regex.cljk rather than
 ;;     skipped, so it cannot rot into an accident.
 ;;   * Alternation is leftmost-LONGEST, not leftmost-first. `a|ab` against
 ;;     "ab" matches the whole of "ab" here and just "a" in a backtracking

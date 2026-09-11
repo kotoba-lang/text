@@ -2,7 +2,7 @@
  :profile :kotoba.regex/bounded-v1
  :date "2026-09-08"
  :legacy
- {:source "src/kotoba/lang/text.cljc"
+ {:source "src/kotoba/lang/text.cljk"
   :status :retained-general-oracle
   :note "kotoba.lang.text keeps the HOST-regex wrappers (re-find / re-matches
          / re-seq / replace / replace-first). They stay: they are the general
@@ -70,7 +70,7 @@
                :measured 47
                :meaning "0 failures over 47 checks. A build that ran nothing
                          answers 0, which is visibly different."}
-  :independent-oracle {:harness "scripts/verify-bounded-regex.cljs"
+  :independent-oracle {:harness "scripts/verify-bounded-regex.cljk"
                        :oracle "the host's own RegExp -- not a mirror
                                 implementation, so a disagreement is real"
                        :comparisons 4640

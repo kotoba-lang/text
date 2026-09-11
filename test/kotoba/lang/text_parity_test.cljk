@@ -228,9 +228,9 @@
 
 (deftest this-namespace-no-longer-requires-clojure-string
   ;; Evidence floor first: an unreadable source must not pass as clean.
-  (let [src #?(:clj  (slurp "src/kotoba/lang/text.cljc")
+  (let [src #?(:clj  (slurp "src/kotoba/lang/text.cljk")
                :cljs (.readFileSync (js/require "node:fs")
-                                    "src/kotoba/lang/text.cljc" "utf8"))]
+                                    "src/kotoba/lang/text.cljk" "utf8"))]
     (is (< 5000 (count src)) "text.cljc source was actually read")
     (is (not (cstr/includes? src "[clojure.string"))
         "kotoba.lang.text must not require clojure.string")
