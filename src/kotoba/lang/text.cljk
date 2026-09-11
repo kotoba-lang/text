@@ -6,6 +6,7 @@
   clojure.core/format, which is JVM-only. Runs on JVM/SCI/CLJS/GraalVM/kotoba-WASM.
 
   Zero third-party runtime deps; .cljc."
+  {:kotoba/export [blank-text? blank? capitalize codepoints ends-with? escape format from-codepoints includes? index-of index-of-text join last-index-of last-index-of-text lower pad-center-text pad-left pad-left-text pad-right pad-right-text re-find re-matches re-quote re-seq repeat-text replace replace-first replace-first-text reverse reverse-text segment-count-text segment-text split split-lines starts-with? trim trim-newline trim-newline-text trim-text triml triml-text trimr trimr-text truncate upper]}
   (:refer-clojure :exclude [format split join replace re-find re-matches re-seq
                             reverse]))
 
