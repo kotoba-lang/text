@@ -6,7 +6,7 @@
 ;;
 ;;   node <amu>/bin/amu compile src/kotoba/lang/bounded_regex.kotoba \
 ;;     --target web --policy scripts/bounded-regex-policy.edn --output /tmp/re.mjs
-;;   nbb scripts/verify-bounded-regex.cljs /tmp/re.mjs
+;;   nbb scripts/verify-bounded-regex.cljk /tmp/re.mjs
 ;;
 ;; Exit 0 clean, 1 findings, 2 REFUSED (it could not answer -- distinct from
 ;; both, so "could not run" never reads as "ran and was fine").
@@ -137,7 +137,7 @@
 
 (cond
   (nil? artifact)
-  (refuse! "usage: nbb scripts/verify-bounded-regex.cljs <compiled-web-artifact.mjs>")
+  (refuse! "usage: nbb scripts/verify-bounded-regex.cljk <compiled-web-artifact.mjs>")
 
   (not (fs/existsSync artifact))
   (refuse! (str "artifact not found: " artifact))
