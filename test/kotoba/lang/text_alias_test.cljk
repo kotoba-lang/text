@@ -11,7 +11,7 @@
   aliases are exercised as functions instead -- weaker, but it does catch an
   alias that failed to resolve, which is the failure that would otherwise only
   show up in a consumer."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.text :as text]
             [kotoba.text :as ktext]
             [kotoba.string :as kstring]))

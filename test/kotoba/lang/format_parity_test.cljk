@@ -9,7 +9,7 @@
 
   :clj only, deliberately. On cljs there is nothing to compare against, which is
   the whole reason this function exists."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.text :as text]))
 
 (def cases
