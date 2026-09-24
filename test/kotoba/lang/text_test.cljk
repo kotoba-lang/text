@@ -1,6 +1,6 @@
 (ns kotoba.lang.text-test
   (:require [clojure.string :as cstr]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.text :as t]))
 
 (deftest split-join

@@ -6,7 +6,7 @@
   The old implementation handled bare %s %d %x %f and emitted a literal for
   anything else -- so %.2f produced \"%.\" followed by \"2f\" as text. It did not
   throw. These tests exist because silently wrong output is the failure mode."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.text :as text]))
 
 (deftest bare-conversions
