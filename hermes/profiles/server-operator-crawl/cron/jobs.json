@@ -20,7 +20,7 @@
       "script": "operator_evidence.py",
       "skill": null,
       "skills": [],
-      "workdir": "~/.gftd/worktrees/server-operator-crawl"
+      "workdir": null
     }
   ]
 }
