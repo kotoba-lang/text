@@ -20,7 +20,7 @@
       "script": "whois_evidence.py",
       "skill": null,
       "skills": [],
-      "workdir": "~/.itonami/worktrees/whois-org-crawl"
+      "workdir": null
     }
   ]
 }
