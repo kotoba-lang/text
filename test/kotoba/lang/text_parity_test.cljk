@@ -159,11 +159,11 @@
   ;; template typo must not turn into missing output.
   (is (= :text/no-such-group
          (try (t/replace "a" #"a" "$1") ::no-throw
-              (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+              (catch :default e
                 (:type (ex-data e))))))
   (is (= :text/no-such-group
          (try (t/replace "ab" #"(a)b" "$2") ::no-throw
-              (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+              (catch :default e
                 (:type (ex-data e))))))
   ;; a group that EXISTS but did not participate is not this case: it expands
   ;; to nothing, like Java
