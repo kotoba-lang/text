@@ -18,7 +18,8 @@
          '[kotoba.lang.format-test]
          '[kotoba.lang.text-test]
          '[kotoba.lang.text-alias-test]
-         '[kotoba.lang.text-parity-test])
+         '[kotoba.lang.text-parity-test]
+         '[kotoba.lang.ns-attr-map-test])
 
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (when-not (t/successful? m) (set! (.-exitCode js/process) 1)))
@@ -26,4 +27,5 @@
 (t/run-tests 'kotoba.lang.format-test
              'kotoba.lang.text-test
              'kotoba.lang.text-alias-test
-             'kotoba.lang.text-parity-test)
+             'kotoba.lang.text-parity-test
+             'kotoba.lang.ns-attr-map-test)
