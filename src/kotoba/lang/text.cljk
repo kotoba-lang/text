@@ -90,8 +90,19 @@
   ([coll] (apply str coll))
   ([sep coll] (apply str (interpose sep coll))))
 
+;; A separator may be written as a plain STRING, meaning that exact text (not a
+;; pattern). This is what lets one call site run on the JVM/nbb host and on the
+;; guest route, where a `#"..."` literal is a reader rejection: the guest twin
+;; (`kotoba-lang/kotoba-lang` lang/compat/kotoba/lang/text.kotoba) takes only a
+;; string separator.
+(declare re-quote)
+
+(defn- literal-or-pattern [re]
+  (if (string? re) (re-pattern (re-quote re)) re))
+
 (defn split
-  "Split `s` on regex `re`, returning a vector of substrings.
+  "Split `s` on regex `re` (or on the exact text `re`, when it is a string),
+  returning a vector of substrings.
 
   `java.util.regex.Pattern/split` semantics, reimplemented rather than
   delegated:
@@ -106,7 +117,7 @@
   ([s re limit]
    (let [s       (str s)
          limited (pos? limit)
-         spans   (match-spans re s)]
+         spans   (match-spans (literal-or-pattern re) s)]
      (loop [spans spans, index 0, parts []]
        (if-let [{:keys [start end]} (first spans)]
          (cond

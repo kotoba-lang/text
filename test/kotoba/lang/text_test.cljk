@@ -8,6 +8,18 @@
   (is (= ["a" "b"] (t/split-lines "a\nb")))
   (is (= "a-b-c" (t/join "-" ["a" "b" "c"]))))
 
+(deftest split-takes-a-string-as-the-exact-separator
+  ;; A string separator is literal text, not a pattern: "." is a dot, not "any
+  ;; character". One call site can then run on the guest route, where #"..." is a
+  ;; reader rejection.
+  (is (= ["1" "2" "3"] (t/split "1.2.3" ".")))
+  (is (= ["a" "b" "c"] (t/split "a::b::c" "::")))
+  (is (= ["a" "b::c"] (t/split "a::b::c" "::" 2)))
+  (is (= ["a" "b" ""] (t/split "a,b," "," -1)))
+  (is (= ["a" "b"] (t/split "a,b," ",")))
+  (is (= ["abc"] (t/split "abc" ",")))
+  (is (= ["a" "b" "c"] (t/split "a b c" #" ")) "a regex still works"))
+
 (deftest trim-and-case
   (is (= "hi" (t/trim "  hi  ")))
   (is (= "hi" (t/triml "  hi")))
