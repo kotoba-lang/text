@@ -9,7 +9,7 @@ wiki.yataverse.com (repo: network-awai/app-hyakka) に全世界のサーバー�
 1 回の実行につき:
 
 1. evidence script (scripts/operator_evidence.py) の測定を読む。REFUSED なら何もせず停止。
-2. `~/.gftd/worktrees/server-operator-crawl` worktree で
+2. `~/.itonami-fleet/worktrees/server-operator-crawl` worktree で
    `config/knowledge-ingest.edn` の既存 `:sources` と重複しない運営会社の
    first-party source を探す:
    - データセンターサービス事業者の公式サイト (Equinix, Digital Realty, NTT GDC 等)
@@ -18,7 +18,7 @@ wiki.yataverse.com (repo: network-awai/app-hyakka) に全世界のサーバー�
    - ISP / ネットワーク事業者の公式 AS/ネットワーク情報ページ
 3. 各候補 URL をこの run 内で実際に fetch して HTTP 200 を確認。未 fetch URL は提案禁止。
 4. `/tmp/hyakka-source-proposal.edn` に proposal を書き、gate
-   `kbb --backend sci --classpath "src:$HOME/github/com-junkawasaki/orgs/kotoba-lang/text/src" scripts/verify_source_proposal.cljk --root . --proposal /tmp/hyakka-source-proposal.edn`
+   `kbb --backend sci --classpath "src:$HOME/github/kotoba-lang/text/src" scripts/verify_source_proposal.cljk --root . --proposal /tmp/hyakka-source-proposal.edn`
    を通す。exit 0 のときだけ topic branch → PR (network-awai/app-hyakka)。
 
 ## 規律
