@@ -17,7 +17,7 @@
         "expr": "35 8 * * *",
         "display": "35 8 * * *"
       },
-      "script": "standards_evidence.py",
+      "script": "standards_evidence.hy",
       "skill": null,
       "skills": [],
       "workdir": null
