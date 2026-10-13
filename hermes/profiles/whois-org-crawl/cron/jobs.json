@@ -17,7 +17,7 @@
         "expr": "35 7 * * *",
         "display": "35 7 * * *"
       },
-      "script": "whois_evidence.py",
+      "script": "whois_evidence.hy",
       "skill": null,
       "skills": [],
       "workdir": null
