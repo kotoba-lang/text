@@ -4,9 +4,9 @@
 
 **String / regex / unicode helpers** — the foundational-stdlib gap every other
 lib re-rolls (`json`, `lint`, `time` hand-roll string ops). Zero third-party
-deps; every namespace is `.cljc` (JVM / SCI / ClojureScript / GraalVM /
+deps; every namespace is `.cljk` (formerly `.cljc`; JVM / SCI / ClojureScript / GraalVM /
 kotoba-WASM). `kotoba.lang.bounded-regex` is a bounded, backtracking-free regex engine a
-`.kotoba` guest can call; the `.cljc` wrappers below still use the host's
+`.kotoba` guest can call; the `.cljk` wrappers below still use the host's
 `#"..."` as the general oracle. Pure string ops are portable. See
 [`docs/adr/ADR-kotoba-lang-foundational-stdlib.md`](https://github.com/kotoba-lang/kotoba-lang/blob/main/docs/adr/ADR-kotoba-lang-foundational-stdlib.md).
 
