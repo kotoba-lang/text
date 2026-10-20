@@ -382,9 +382,15 @@
   host's float printing."
   [x prec]
   (let [neg? (neg? x)
-        x (Math/abs (double x))
-        scale (Math/pow 10 prec)
-        scaled (Math/round (* x scale))
+        x #?(:kotoba (if neg? (- x) x)
+             :default (Math/abs (double x)))
+        scale #?(:kotoba (loop [remaining prec result 1]
+                           (if (pos? remaining)
+                             (recur (dec remaining) (* result 10))
+                             result))
+                 :default (Math/pow 10 prec))
+        scaled #?(:kotoba (long (+ (* x scale) 0.5))
+                  :default (Math/round (* x scale)))
         i (long (quot scaled scale))
         f (long (- scaled (* i scale)))
         frac (when (pos? prec) (pad (str f) prec false \0))]
